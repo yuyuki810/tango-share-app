@@ -1,0 +1,1122 @@
+/**
+ * restore_phase_a_complete.js
+ * フェーズA完了時点の洗練されたUI・コンポーネント・API一式を完全復元するスクリプト
+ * 
+ * 実行方法: node restore_phase_a_complete.js
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+const files = {
+  // =========================================================================
+  // 1. 日付ユーティリティ & 週間スケジュール計算ロジック
+  // =========================================================================
+  'lib/assignment/weekDates.ts': `/**
+ * 土曜始まりの曜日ラベル（土〜金）
+ */
+export const DAY_LABELS_SAT = ['土', '日', '月', '火', '水', '木', '金'] as const;
+
+/**
+ * JST (UTC+9) 基準の日付文字列 (YYYY-MM-DD) を取得する
+ */
+export function getTodayJST(): string {
+  const now = new Date();
+  const jst = new Date(now.getTime() + (9 * 60 + now.getTimezoneOffset()) * 60 * 1000);
+  return jst.toISOString().slice(0, 10);
+}
+
+/**
+ * JST基準で今週の開始日(直近の土曜日)を取得する
+ */
+export function getThisWeekSaturdayJST(): string {
+  const todayStr = getTodayJST();
+  const [y, m, d] = todayStr.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+
+  const day = date.getUTCDay();
+  const diffToSat = (day + 1) % 7;
+  date.setUTCDate(date.getUTCDate() - diffToSat);
+
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * 週開始日(土曜日)から7日分(土〜金)の日付文字列の配列を返す
+ */
+export function getWeekDates(weekStartDate: string): string[] {
+  const [y, m, d] = weekStartDate.split('-').map(Number);
+  const dates: string[] = [];
+
+  for (let i = 0; i < 7; i++) {
+    const current = new Date(Date.UTC(y, m - 1, d + i));
+    dates.push(current.toISOString().slice(0, 10));
+  }
+
+  return dates;
+}
+
+/**
+ * 指定日の前日の日付文字列を取得する
+ */
+export function getYesterday(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+`,
+
+  'lib/assignment/calculateAssignments.ts': `import { getWeekDates, DAY_LABELS_SAT } from './weekDates';
+
+export type DayType = 'progress' | 'review' | 'rest';
+
+export interface CalculatedDay {
+  date: string;
+  dayLabel: string;
+  dayType: DayType;
+  rangeStart: number | null;
+  rangeEnd: number | null;
+  wordCount: number;
+}
+
+export interface CalculateParams {
+  weekStartDate: string;
+  startNumber: number;
+  wordsPerDay: number;
+  pattern: '5-2' | '4-3' | 'custom';
+  daySequence?: DayType[]; // custom時の7日分
+  totalWords?: number;
+}
+
+export function calculateWeeklyAssignments(params: CalculateParams): CalculatedDay[] {
+  const { weekStartDate, startNumber, wordsPerDay, pattern, totalWords = 2000 } = params;
+  const dates = getWeekDates(weekStartDate);
+
+  let sequence: DayType[] = [];
+  if (pattern === '5-2') {
+    sequence = ['progress', 'progress', 'progress', 'progress', 'progress', 'review', 'review'];
+  } else if (pattern === '4-3') {
+    sequence = ['progress', 'progress', 'progress', 'progress', 'review', 'review', 'review'];
+  } else {
+    sequence = params.daySequence ?? ['progress', 'progress', 'progress', 'progress', 'progress', 'review', 'review'];
+  }
+
+  let currentStart = startNumber;
+  let weekProgressStart: number | null = null;
+  let weekProgressEnd: number | null = null;
+
+  const result: CalculatedDay[] = [];
+
+  for (let i = 0; i < 7; i++) {
+    const date = dates[i];
+    const dayLabel = DAY_LABELS_SAT[i];
+    const dayType = sequence[i] ?? 'progress';
+
+    if (dayType === 'progress') {
+      const pStart = currentStart;
+      const pEnd = Math.min(pStart + wordsPerDay - 1, totalWords);
+      const count = pEnd >= pStart ? pEnd - pStart + 1 : 0;
+
+      if (weekProgressStart === null) weekProgressStart = pStart;
+      weekProgressEnd = pEnd;
+      currentStart = pEnd + 1;
+
+      result.push({
+        date,
+        dayLabel,
+        dayType,
+        rangeStart: pStart,
+        rangeEnd: pEnd,
+        wordCount: count,
+      });
+    } else if (dayType === 'review') {
+      // 復習日は今週進めた全範囲を復習
+      const rStart = weekProgressStart ?? startNumber;
+      const rEnd = weekProgressEnd ?? (startNumber + wordsPerDay - 1);
+      const count = rEnd >= rStart ? rEnd - rStart + 1 : 0;
+
+      result.push({
+        date,
+        dayLabel,
+        dayType,
+        rangeStart: rStart,
+        rangeEnd: rEnd,
+        wordCount: count,
+      });
+    } else {
+      // rest (休み)
+      result.push({
+        date,
+        dayLabel,
+        dayType: 'rest',
+        rangeStart: null,
+        rangeEnd: null,
+        wordCount: 0,
+      });
+    }
+  }
+
+  return result;
+}
+`,
+
+  // =========================================================================
+  // 2. 週間設定モーダル & サイクル設定コンポーネント群
+  // =========================================================================
+  'components/weekly-range/DaySequenceEditor.tsx': `"use client";
+
+import { DayType } from '@/lib/assignment/calculateAssignments';
+import { DAY_LABELS_SAT } from '@/lib/assignment/weekDates';
+
+interface DaySequenceEditorProps {
+  sequence: DayType[];
+  onChange: (newSequence: DayType[]) => void;
+}
+
+export function DaySequenceEditor({ sequence, onChange }: DaySequenceEditorProps) {
+  const toggleDayType = (index: number) => {
+    const current = sequence[index];
+    let next: DayType = 'progress';
+    if (current === 'progress') next = 'review';
+    else if (current === 'review') next = 'rest';
+    else next = 'progress';
+
+    const updated = [...sequence];
+    updated[index] = next;
+    onChange(updated);
+  };
+
+  const getBadgeStyle = (type: DayType) => {
+    switch (type) {
+      case 'progress':
+        return 'bg-ink text-paper border-ink';
+      case 'review':
+        return 'bg-akashiito text-paper border-akashiito';
+      case 'rest':
+        return 'bg-white/80 text-ink/40 border-line border-dashed';
+    }
+  };
+
+  const getLabel = (type: DayType) => {
+    switch (type) {
+      case 'progress':
+        return '進む';
+      case 'review':
+        return '復習';
+      case 'rest':
+        return '休';
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-xs text-ink/60">
+        <span>曜日別カスタム設定（タップで切替）</span>
+        <span>進 → 復 → 休</span>
+      </div>
+      <div className="grid grid-cols-7 gap-1.5">
+        {DAY_LABELS_SAT.map((label, index) => {
+          const type = sequence[index] ?? 'progress';
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => toggleDayType(index)}
+              className={
+                'flex flex-col items-center justify-center rounded-xl border py-2.5 transition active:scale-95 ' +
+                getBadgeStyle(type)
+              }
+            >
+              <span className="font-maru text-xs opacity-80">{label}</span>
+              <span className="mt-1 font-mincho text-xs font-bold">{getLabel(type)}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+`,
+
+  'components/weekly-range/CycleSettingsPanel.tsx': `"use client";
+
+import { DayType } from '@/lib/assignment/calculateAssignments';
+
+interface CycleSettingsPanelProps {
+  pattern: '5-2' | '4-3' | 'custom';
+  onPatternChange: (p: '5-2' | '4-3' | 'custom') => void;
+  startNumber: number;
+  onStartNumberChange: (n: number) => void;
+  wordsPerDay: number;
+  onWordsPerDayChange: (n: number) => void;
+  totalWords: number;
+}
+
+export function CycleSettingsPanel({
+  pattern,
+  onPatternChange,
+  startNumber,
+  onStartNumberChange,
+  wordsPerDay,
+  onWordsPerDayChange,
+  totalWords,
+}: CycleSettingsPanelProps) {
+  const quickWords = [20, 30, 50, 100];
+
+  const adjustStart = (delta: number) => {
+    const next = Math.max(1, Math.min(startNumber + delta, totalWords));
+    onStartNumberChange(next);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* サイクルプリセット */}
+      <div>
+        <label className="mb-2 block font-mincho text-xs font-bold text-ink/70">
+          学習サイクル（進める日 + 復習日）
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => onPatternChange('5-2')}
+            className={
+              'rounded-xl border p-3 text-center transition ' +
+              (pattern === '5-2'
+                ? 'border-ink bg-ink text-paper shadow-sm'
+                : 'border-line bg-white/70 text-ink/70 hover:bg-white')
+            }
+          >
+            <div className="font-mincho text-sm font-bold">5進2戻</div>
+            <div className="mt-0.5 text-[10px] opacity-70">武田塾・王道式</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => onPatternChange('4-3')}
+            className={
+              'rounded-xl border p-3 text-center transition ' +
+              (pattern === '4-3'
+                ? 'border-ink bg-ink text-paper shadow-sm'
+                : 'border-line bg-white/70 text-ink/70 hover:bg-white')
+            }
+          >
+            <div className="font-mincho text-sm font-bold">4進3戻</div>
+            <div className="mt-0.5 text-[10px] opacity-70">復習重視</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => onPatternChange('custom')}
+            className={
+              'rounded-xl border p-3 text-center transition ' +
+              (pattern === 'custom'
+                ? 'border-ink bg-ink text-paper shadow-sm'
+                : 'border-line bg-white/70 text-ink/70 hover:bg-white')
+            }
+          >
+            <div className="font-mincho text-sm font-bold">カスタム</div>
+            <div className="mt-0.5 text-[10px] opacity-70">自由設定</div>
+          </button>
+        </div>
+      </div>
+
+      {/* 今週の開始単語No */}
+      <div className="rounded-2xl border border-line bg-white/60 p-4">
+        <div className="flex items-center justify-between">
+          <label className="font-mincho text-xs font-bold text-ink/70">
+            開始単語番号（No.）
+          </label>
+          <span className="font-maru text-xs text-ink/40">全 {totalWords} 語</span>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => adjustStart(-50)}
+            className="h-10 w-12 rounded-lg border border-line bg-white text-xs font-bold text-ink/70 active:scale-95"
+          >
+            -50
+          </button>
+          <button
+            type="button"
+            onClick={() => adjustStart(-10)}
+            className="h-10 w-10 rounded-lg border border-line bg-white text-xs font-bold text-ink/70 active:scale-95"
+          >
+            -10
+          </button>
+          <input
+            type="number"
+            min={1}
+            max={totalWords}
+            value={startNumber || ''}
+            onChange={(e) => onStartNumberChange(Math.max(1, Number(e.target.value)))}
+            className="h-10 flex-1 rounded-lg border border-line bg-white px-3 text-center font-mincho text-lg font-bold text-ink focus:border-ink focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => adjustStart(10)}
+            className="h-10 w-10 rounded-lg border border-line bg-white text-xs font-bold text-ink/70 active:scale-95"
+          >
+            +10
+          </button>
+          <button
+            type="button"
+            onClick={() => adjustStart(50)}
+            className="h-10 w-12 rounded-lg border border-line bg-white text-xs font-bold text-ink/70 active:scale-95"
+          >
+            +50
+          </button>
+        </div>
+      </div>
+
+      {/* 1日あたりの語数 */}
+      <div className="rounded-2xl border border-line bg-white/60 p-4">
+        <label className="font-mincho text-xs font-bold text-ink/70">
+          1日の進める単語数
+        </label>
+        <div className="mt-2.5 flex items-center gap-2">
+          {quickWords.map((count) => (
+            <button
+              key={count}
+              type="button"
+              onClick={() => onWordsPerDayChange(count)}
+              className={
+                'flex-1 rounded-lg border py-1.5 font-maru text-xs transition ' +
+                (wordsPerDay === count
+                  ? 'border-ink bg-ink text-paper font-bold shadow-sm'
+                  : 'border-line bg-white text-ink/70 hover:bg-white/90')
+              }
+            >
+              {count}語
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+`,
+
+  'components/weekly-range/WeeklyPreviewPanel.tsx': `"use client";
+
+import { CalculatedDay } from '@/lib/assignment/calculateAssignments';
+
+interface WeeklyPreviewPanelProps {
+  days: CalculatedDay[];
+}
+
+export function WeeklyPreviewPanel({ days }: WeeklyPreviewPanelProps) {
+  const totalTargetWords = days
+    .filter((d) => d.dayType === 'progress')
+    .reduce((acc, cur) => acc + cur.wordCount, 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="font-mincho text-xs font-bold text-ink/70">1週間のスケジュール確認</span>
+        <span className="rounded-full bg-ink/5 px-2.5 py-0.5 font-maru text-xs text-ink/70">
+          週間新規: <strong className="text-ink">{totalTargetWords}語</strong>
+        </span>
+      </div>
+
+      <div className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white/80">
+        {days.map((day) => (
+          <div key={day.date} className="flex items-center justify-between px-3.5 py-2.5 text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-5 text-center font-bold text-ink/50">{day.dayLabel}</span>
+              <span className="font-maru text-ink/40">{day.date.slice(5)}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {day.dayType === 'progress' ? (
+                <>
+                  <span className="rounded bg-ink/10 px-1.5 py-0.5 text-[10px] font-bold text-ink">
+                    進める日
+                  </span>
+                  <span className="font-mincho font-bold text-ink">
+                    No.{day.rangeStart} 〜 {day.rangeEnd}
+                  </span>
+                  <span className="text-[11px] text-ink/50">({day.wordCount}語)</span>
+                </>
+              ) : day.dayType === 'review' ? (
+                <>
+                  <span className="rounded bg-akashiito/10 px-1.5 py-0.5 text-[10px] font-bold text-akashiito">
+                    復習日
+                  </span>
+                  <span className="font-mincho text-ink/80">
+                    No.{day.rangeStart} 〜 {day.rangeEnd}
+                  </span>
+                  <span className="text-[11px] text-ink/50">(総復習)</span>
+                </>
+              ) : (
+                <span className="text-ink/40">休み</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+`,
+
+  'components/weekly-range/WeeklyRangeModal.tsx': `"use client";
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { calculateWeeklyAssignments, DayType } from '@/lib/assignment/calculateAssignments';
+import { CycleSettingsPanel } from './CycleSettingsPanel';
+import { DaySequenceEditor } from './DaySequenceEditor';
+import { WeeklyPreviewPanel } from './WeeklyPreviewPanel';
+
+interface WeeklyRangeModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  wordbookId: string;
+  wordbookTotalWords: number;
+  weekStartDate: string;
+  initialStartNumber?: number;
+}
+
+export function WeeklyRangeModal({
+  isOpen,
+  onClose,
+  wordbookId,
+  wordbookTotalWords,
+  weekStartDate,
+  initialStartNumber = 1,
+}: WeeklyRangeModalProps) {
+  const router = useRouter();
+  const [pattern, setPattern] = useState<'5-2' | '4-3' | 'custom'>('5-2');
+  const [startNumber, setStartNumber] = useState<number>(initialStartNumber);
+  const [wordsPerDay, setWordsPerDay] = useState<number>(50);
+  const [daySequence, setDaySequence] = useState<DayType[]>([
+    'progress',
+    'progress',
+    'progress',
+    'progress',
+    'progress',
+    'review',
+    'review',
+  ]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const previewDays = calculateWeeklyAssignments({
+    weekStartDate,
+    startNumber,
+    wordsPerDay,
+    pattern,
+    daySequence,
+    totalWords: wordbookTotalWords || 2000,
+  });
+
+  const progressDays = previewDays.filter((d) => d.dayType === 'progress');
+  const rangeStart = progressDays[0]?.rangeStart ?? startNumber;
+  const rangeEnd = progressDays[progressDays.length - 1]?.rangeEnd ?? startNumber;
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/weekly-ranges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wordbookId,
+          weekStartDate,
+          rangeStart,
+          rangeEnd,
+          assignments: previewDays.map((d) => ({
+            date: d.date,
+            rangeStart: d.rangeStart,
+            rangeEnd: d.rangeEnd,
+            isReviewDay: d.dayType === 'review',
+            isRestDay: d.dayType === 'rest',
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json();
+        setError(body.error ?? '保存に失敗しました');
+        setIsSaving(false);
+        return;
+      }
+
+      router.refresh();
+      onClose();
+    } catch {
+      setError('通信エラーが発生しました');
+      setIsSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-line bg-paper p-5 shadow-2xl sm:rounded-3xl sm:border">
+        {/* ヘッダー */}
+        <div className="flex items-center justify-between pb-3 border-b border-line">
+          <div>
+            <h2 className="font-mincho text-lg font-bold text-ink">今週の学習目標を設定</h2>
+            <p className="font-maru text-xs text-ink/60">開始日: {weekStartDate} (土曜日)</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-ink/5 text-ink/60 hover:bg-ink/10"
+          >
+            ✕
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-3 rounded-xl bg-akashiito/10 p-3 text-xs text-akashiito">{error}</div>
+        )}
+
+        <div className="mt-4 space-y-6">
+          <CycleSettingsPanel
+            pattern={pattern}
+            onPatternChange={setPattern}
+            startNumber={startNumber}
+            onStartNumberChange={setStartNumber}
+            wordsPerDay={wordsPerDay}
+            onWordsPerDayChange={setWordsPerDay}
+            totalWords={wordbookTotalWords}
+          />
+
+          {pattern === 'custom' && (
+            <DaySequenceEditor sequence={daySequence} onChange={setDaySequence} />
+          )}
+
+          <WeeklyPreviewPanel days={previewDays} />
+
+          {/* 保存ボタン */}
+          <div className="pt-2">
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={handleSave}
+              className="min-h-[52px] w-full rounded-2xl bg-ink px-4 py-3 font-mincho text-base font-bold text-paper shadow-md transition hover:bg-ink/90 active:scale-[0.99] disabled:opacity-50"
+            >
+              {isSaving ? '設定を保存中...' : 'このスケジュールで確定する'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+`
+};
+
+// =========================================================================
+// 3. APIルート: 週間範囲と日次割当の保存
+// =========================================================================
+files['app/api/weekly-ranges/route.ts'] = `import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+
+export async function POST(req: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
+  }
+
+  const body = await req.json();
+  const { wordbookId, weekStartDate, rangeStart, rangeEnd, assignments } = body as {
+    wordbookId: string;
+    weekStartDate: string;
+    rangeStart: number;
+    rangeEnd: number;
+    assignments: Array<{
+      date: string;
+      rangeStart: number | null;
+      rangeEnd: number | null;
+      isReviewDay: boolean;
+      isRestDay?: boolean;
+    }>;
+  };
+
+  if (!wordbookId || !weekStartDate || !rangeStart || !rangeEnd || !Array.isArray(assignments)) {
+    return NextResponse.json({ error: 'パラメータが不足しています' }, { status: 400 });
+  }
+
+  // 1. weekly_ranges の保存 (upsert)
+  const { error: wrError } = await supabase.from('weekly_ranges').upsert(
+    {
+      user_id: user.id,
+      wordbook_id: wordbookId,
+      week_start_date: weekStartDate,
+      range_start: rangeStart,
+      range_end: rangeEnd,
+    },
+    { onConflict: 'user_id,week_start_date' }
+  );
+
+  if (wrError) {
+    return NextResponse.json({ error: '週間範囲の保存に失敗しました', detail: wrError.message }, { status: 500 });
+  }
+
+  // 2. daily_assignments の保存 (休みの日以外を登録/更新)
+  const assignmentRows = assignments
+    .filter((a) => !a.isRestDay && a.rangeStart !== null && a.rangeEnd !== null)
+    .map((a) => ({
+      user_id: user.id,
+      wordbook_id: wordbookId,
+      date: a.date,
+      range_start: a.rangeStart!,
+      range_end: a.rangeEnd!,
+      is_review_day: a.isReviewDay,
+    }));
+
+  // 同週の既存割当を一度リセットして再登録
+  const dates = assignments.map((a) => a.date);
+  await supabase
+    .from('daily_assignments')
+    .delete()
+    .eq('user_id', user.id)
+    .in('date', dates);
+
+  if (assignmentRows.length > 0) {
+    const { error: daError } = await supabase.from('daily_assignments').insert(assignmentRows);
+    if (daError) {
+      return NextResponse.json({ error: '日次割当の保存に失敗しました', detail: daError.message }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ ok: true });
+}
+`;
+
+// =========================================================================
+// 4. ダッシュボードコンポーネント群 (質感の高いUI)
+// =========================================================================
+files['components/dashboard/SetRangeCTA.tsx'] = `"use client";
+
+import { useState } from 'react';
+import { WeeklyRangeModal } from '@/components/weekly-range/WeeklyRangeModal';
+
+interface SetRangeCTAProps {
+  wordbookId: string;
+  wordbookTotalWords: number;
+  weekStartDate: string;
+  hasExistingRange?: boolean;
+}
+
+export function SetRangeCTA({
+  wordbookId,
+  wordbookTotalWords,
+  weekStartDate,
+  hasExistingRange = false,
+}: SetRangeCTAProps) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  return (
+    <>
+      <div className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-b from-white/90 to-white/50 p-6 shadow-sm">
+        <div className="relative z-10">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-akashiito/30 bg-akashiito/5 px-3 py-0.5 text-xs text-akashiito">
+            <span className="h-1.5 w-1.5 rounded-full bg-akashiito animate-pulse" />
+            今週の計画が未設定です
+          </div>
+          <h2 className="mt-3 font-mincho text-xl font-bold text-ink">
+            今週の学習目標を設定しましょう
+          </h2>
+          <p className="mt-1 font-maru text-xs text-ink/60 leading-relaxed">
+            5進2戻（武田塾式）などのサイクルを選んで、1日ごとの進捗を自動生成します。
+          </p>
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="min-h-[48px] w-full rounded-2xl bg-akashiito px-5 py-3 font-mincho text-sm font-bold text-paper shadow-md transition hover:opacity-95 active:scale-[0.99]"
+            >
+              学習サイクルと範囲を設定する
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <WeeklyRangeModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        wordbookId={wordbookId}
+        wordbookTotalWords={wordbookTotalWords}
+        weekStartDate={weekStartDate}
+      />
+    </>
+  );
+}
+`;
+
+files['components/dashboard/TodayRangeCard.tsx'] = `interface TodayRangeCardProps {
+  rangeStart: number | null;
+  rangeEnd: number | null;
+  isReviewDay: boolean;
+  wordbookName: string;
+}
+
+export function TodayRangeCard({
+  rangeStart,
+  rangeEnd,
+  isReviewDay,
+  wordbookName,
+}: TodayRangeCardProps) {
+  const hasRange = rangeStart !== null && rangeEnd !== null;
+  const count = hasRange ? rangeEnd - rangeStart + 1 : 0;
+
+  return (
+    <div className="relative overflow-hidden rounded-3xl border border-line bg-white/80 p-6 shadow-sm backdrop-blur-sm">
+      <div className="flex items-center justify-between border-b border-line/60 pb-3">
+        <span className="font-mincho text-xs font-bold text-ink/60">今日のノルマ</span>
+        <span className="rounded-full border border-line bg-paper px-2.5 py-0.5 font-maru text-xs text-ink/70">
+          {wordbookName || '単語帳'}
+        </span>
+      </div>
+
+      <div className="mt-4">
+        {hasRange ? (
+          <div>
+            <div className="flex items-center gap-2">
+              <span
+                className={
+                  'rounded-md px-2 py-0.5 text-xs font-bold ' +
+                  (isReviewDay
+                    ? 'bg-akashiito/10 text-akashiito'
+                    : 'bg-ink/10 text-ink')
+                }
+              >
+                {isReviewDay ? '復習日（総復習）' : '進める日'}
+              </span>
+              <span className="font-maru text-xs text-ink/40">全 {count} 語</span>
+            </div>
+
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="font-mincho text-xs text-ink/50">No.</span>
+              <span className="font-mincho text-3xl font-bold tracking-tight text-ink">
+                {rangeStart}
+              </span>
+              <span className="font-mincho text-xl text-ink/40">〜</span>
+              <span className="font-mincho text-3xl font-bold tracking-tight text-ink">
+                {rangeEnd}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="py-2 text-center text-sm text-ink/50">
+            本日は学習の割り当てがありません
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+`;
+
+files['components/dashboard/WeeklySchedule.tsx'] = `import { DAY_LABELS_SAT } from '@/lib/assignment/weekDates';
+
+interface DaySchedule {
+  date: string;
+  rangeStart: number | null;
+  rangeEnd: number | null;
+  isReviewDay: boolean;
+}
+
+interface WeeklyScheduleProps {
+  days: DaySchedule[];
+  todayDate: string;
+}
+
+export function WeeklySchedule({ days, todayDate }: WeeklyScheduleProps) {
+  return (
+    <div className="grid grid-cols-7 gap-1.5">
+      {days.map((day, index) => {
+        const isToday = day.date === todayDate;
+        const isRest = day.rangeStart === null || day.rangeEnd === null;
+        const dayLabel = DAY_LABELS_SAT[index] ?? '';
+
+        return (
+          <div
+            key={day.date}
+            className={
+              'relative flex flex-col items-center rounded-2xl border p-2 transition ' +
+              (isToday
+                ? 'border-akashiito bg-akashiito/5 shadow-sm ring-1 ring-akashiito'
+                : isRest
+                ? 'border-line/40 bg-white/30 text-ink/30'
+                : 'border-line bg-white/70 text-ink')
+            }
+          >
+            {isToday && (
+              <span className="absolute -top-2 rounded-full bg-akashiito px-1.5 py-0.2 text-[9px] font-bold text-paper shadow-sm">
+                今日
+              </span>
+            )}
+            <span className={'mt-1 font-maru text-xs ' + (isToday ? 'font-bold text-akashiito' : 'text-ink/60')}>
+              {dayLabel}
+            </span>
+            <span className="font-maru text-[10px] text-ink/40">{day.date.slice(8)}日</span>
+
+            <div className="mt-2 min-h-[36px] flex flex-col items-center justify-center">
+              {isRest ? (
+                <span className="text-[10px] text-ink/30">休</span>
+              ) : day.isReviewDay ? (
+                <span className="rounded bg-akashiito/10 px-1 py-0.5 text-[9px] font-bold text-akashiito">
+                  復習
+                </span>
+              ) : (
+                <div className="text-center font-mincho text-[10px] leading-tight font-bold text-ink">
+                  <div>{day.rangeStart}</div>
+                  <div className="text-[8px] text-ink/40">↓</div>
+                  <div>{day.rangeEnd}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+`;
+
+files['components/dashboard/TestCTA.tsx'] = `import Link from 'next/link';
+
+interface TestCTAProps {
+  wordCount: number;
+  isReviewDay: boolean;
+}
+
+export function TestCTA({ wordCount, isReviewDay }: TestCTAProps) {
+  return (
+    <Link
+      href="/test"
+      className="group relative block min-h-[56px] w-full overflow-hidden rounded-2xl bg-akashiito px-4 py-3.5 text-center font-mincho text-base font-bold text-paper shadow-md transition hover:opacity-95 active:scale-[0.99]"
+    >
+      <span className="relative z-10 flex items-center justify-center gap-2">
+        <span>{isReviewDay ? '復習テストを始める' : '今日の確認テストを始める'}</span>
+        <span className="rounded-full bg-paper/20 px-2 py-0.5 font-maru text-xs font-normal">
+          {wordCount}語
+        </span>
+      </span>
+    </Link>
+  );
+}
+`;
+
+files['components/dashboard/StreakBadge.tsx'] = `interface StreakBadgeProps {
+  currentStreak: number;
+}
+
+export function StreakBadge({ currentStreak }: StreakBadgeProps) {
+  if (currentStreak === 0) return null;
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3.5 py-1 text-xs font-bold text-ink/70 shadow-sm">
+      <span className="text-sm">🔥</span>
+      <span>{currentStreak}日連続達成中</span>
+    </span>
+  );
+}
+`;
+
+// =========================================================================
+// 5. ナビゲーション & レイアウト
+// =========================================================================
+files['components/layout/BottomNav.tsx'] = `"use client";
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+
+export function BottomNav() {
+  const pathname = usePathname();
+
+  if (pathname === '/test') return null;
+
+  const links = [
+    { href: '/dashboard', label: 'ホーム', icon: '🏠' },
+    { href: '/group', label: 'グループ', icon: '👥' },
+  ];
+
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-50 mx-auto max-w-md border-t border-line bg-paper/90 backdrop-blur-md">
+      <div className="flex h-16 items-center justify-around px-4">
+        {links.map(({ href, label, icon }) => {
+          const isActive = pathname === href;
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={
+                'flex flex-col items-center gap-1 text-xs transition ' +
+                (isActive ? 'font-bold text-ink' : 'text-ink/50 hover:text-ink/80')
+              }
+            >
+              <span className="text-lg">{icon}</span>
+              <span className="font-mincho">{label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+`;
+
+files['app/(main)/layout.tsx'] = `import { BottomNav } from '@/components/layout/BottomNav';
+
+export default function MainLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-paper text-ink pb-20">
+      {children}
+      <BottomNav />
+    </div>
+  );
+}
+`;
+
+// =========================================================================
+// 6. メインダッシュボード画面
+// =========================================================================
+files['app/(main)/dashboard/page.tsx'] = `import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
+import { getTodayJST, getThisWeekSaturdayJST, getWeekDates } from '@/lib/assignment/weekDates';
+import { TodayRangeCard } from '@/components/dashboard/TodayRangeCard';
+import { WeeklySchedule } from '@/components/dashboard/WeeklySchedule';
+import { SetRangeCTA } from '@/components/dashboard/SetRangeCTA';
+import { TestCTA } from '@/components/dashboard/TestCTA';
+import { StreakBadge } from '@/components/dashboard/StreakBadge';
+
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+
+  const { data: profile } = await supabase
+    .from('users')
+    .select('wordbook_id, wordbooks(name, total_words)')
+    .eq('id', user.id)
+    .single();
+
+  const today = getTodayJST();
+  const weekStartDate = getThisWeekSaturdayJST();
+  const weekDates = getWeekDates(weekStartDate);
+
+  const { data: weeklyRange } = await supabase
+    .from('weekly_ranges')
+    .select('range_start, range_end')
+    .eq('user_id', user.id)
+    .eq('week_start_date', weekStartDate)
+    .maybeSingle();
+
+  const { data: assignments } = await supabase
+    .from('daily_assignments')
+    .select('date, range_start, range_end, is_review_day')
+    .eq('user_id', user.id)
+    .in('date', weekDates);
+
+  const assignmentByDate = new Map((assignments ?? []).map((a) => [a.date, a]));
+  const todayAssignment = assignmentByDate.get(today);
+
+  const { data: todaySession } = await supabase
+    .from('test_sessions')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('date', today)
+    .eq('type', 'daily_check')
+    .maybeSingle();
+
+  const { data: streak } = await supabase
+    .from('streaks')
+    .select('current_streak')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  const weekDays = weekDates.map((date) => {
+    const a = assignmentByDate.get(date);
+    return {
+      date,
+      rangeStart: a?.range_start ?? null,
+      rangeEnd: a?.range_end ?? null,
+      isReviewDay: a?.is_review_day ?? false,
+    };
+  });
+
+  const wordbookName = (profile?.wordbooks as { name?: string } | null)?.name ?? '';
+  const wordbookTotalWords = (profile?.wordbooks as { total_words?: number } | null)?.total_words ?? 2000;
+
+  return (
+    <main className="mx-auto max-w-md space-y-6 px-4 py-6">
+      {/* 状態に応じたトップCTA */}
+      {!weeklyRange ? (
+        <SetRangeCTA
+          wordbookId={profile?.wordbook_id ?? ''}
+          wordbookTotalWords={wordbookTotalWords}
+          weekStartDate={weekStartDate}
+          hasExistingRange={false}
+        />
+      ) : !todayAssignment ? (
+        <div className="rounded-3xl border border-line bg-white/60 p-6 text-center text-ink/60">
+          今日は学習の予定がありません
+        </div>
+      ) : todaySession ? (
+        <div className="rounded-3xl border border-line bg-white p-6 text-center shadow-sm">
+          <p className="font-mincho text-xl font-bold text-ink">今日の分は完了しました！</p>
+          <div className="mt-3">
+            <StreakBadge currentStreak={streak?.current_streak ?? 0} />
+          </div>
+        </div>
+      ) : (
+        <TestCTA
+          wordCount={todayAssignment.range_end - todayAssignment.range_start + 1}
+          isReviewDay={todayAssignment.is_review_day}
+        />
+      )}
+
+      {/* 今日の範囲カード */}
+      <TodayRangeCard
+        rangeStart={todayAssignment?.range_start ?? null}
+        rangeEnd={todayAssignment?.range_end ?? null}
+        isReviewDay={todayAssignment?.is_review_day ?? false}
+        wordbookName={wordbookName}
+      />
+
+      {/* 週間スケジュール */}
+      <section className="rounded-3xl border border-line bg-white/60 p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-mincho text-sm font-bold text-ink/70">今週のスケジュール</h2>
+          {weeklyRange && (
+            <span className="font-maru text-xs text-ink/40">
+              No.{weeklyRange.range_start} 〜 {weeklyRange.range_end}
+            </span>
+          )}
+        </div>
+        <WeeklySchedule days={weekDays} todayDate={today} />
+      </section>
+    </main>
+  );
+}
+`;
+
+// =========================================================================
+// 7. ファイルの一括生成実行
+// =========================================================================
+let count = 0;
+for (const [filePath, content] of Object.entries(files)) {
+  const fullPath = path.join(process.cwd(), filePath);
+  const dir = path.dirname(fullPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(fullPath, content.trim() + '\n', 'utf8');
+  console.log('[Restored] ' + filePath);
+  count++;
+}
+
+console.log(`\n✨ フェーズA完了時点の全UI・コード (${count} 件) を完全に復元しました！`);

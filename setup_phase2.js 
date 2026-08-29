@@ -1,0 +1,482 @@
+/**
+ * 週間範囲設定UI & ナビゲーションバー干渉バグ修正スクリプト
+ * 実行方法: node setup_phase2.js
+ */
+const fs = require("fs");
+const path = require("path");
+
+const files = {
+  // 1. 週間範囲設定モーダル (z-index を z-[60] に引き上げ、スクロール領域と固定フッターを最適化)
+  "components/weekly-range/WeeklyRangeModal.tsx": `"use client";
+
+import { useState, useEffect } from "react";
+import { WeeklyPreviewPanel } from "./WeeklyPreviewPanel";
+import { calculateWeeklyPreview } from "@/lib/assignment/calculateWeeklyPreview";
+
+interface WeeklyRangeModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  userId: string;
+  wordbookId: string;
+  weekStartStr: string;
+  onSaved?: () => void;
+}
+
+export function WeeklyRangeModal({
+  isOpen,
+  onClose,
+  userId,
+  wordbookId,
+  weekStartStr,
+  onSaved,
+}: WeeklyRangeModalProps) {
+  const [startNum, setStartNum] = useState<number>(1);
+  const [endNum, setEndNum] = useState<number>(100);
+  const [wordsPerDay, setWordsPerDay] = useState<number>(20);
+  const [pacePreset, setPacePreset] = useState<"standard" | "speed" | "review_heavy">("standard");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const preview = calculateWeeklyPreview({
+    rangeStart: startNum,
+    rangeEnd: endNum,
+    wordsPerDay,
+    pace: pacePreset,
+    weekStartDateSaturday: weekStartStr,
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (startNum > endNum) return;
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("/api/weekly-ranges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          wordbookId,
+          weekStartDate: weekStartStr,
+          rangeStart: startNum,
+          rangeEnd: endNum,
+          wordsPerDay,
+          pace: pacePreset,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "週間範囲の保存に失敗しました");
+      }
+
+      if (onSaved) onSaved();
+      onClose();
+    } catch (err: any) {
+      console.error("Weekly range save error:", err);
+      alert(err.message || "週間範囲の保存に失敗しました。再度お試しください。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    // z-[60] で BottomNav (z-40) の最前面に確実にオーバーレイを展開
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
+      {/* 背景オーバーレイ */}
+      <div
+        className="fixed inset-0 bg-ink/40 backdrop-blur-[2px] transition-opacity"
+        onClick={onClose}
+      />
+
+      {/* モーダル本体（画面高さを超えないようスクロールコンテナ化） */}
+      <div className="relative w-full max-w-lg bg-paper rounded-t-2xl sm:rounded-2xl border border-line shadow-2xl z-10 max-h-[85vh] sm:max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-200">
+        {/* ドラッグインジケータ / ヘッダー */}
+        <div className="pt-3 pb-2 px-6 flex flex-col items-center border-b border-line/60 flex-shrink-0">
+          <div className="w-12 h-1 bg-ink/20 rounded-full mb-3 sm:hidden" />
+          <div className="w-full flex items-center justify-between">
+            <div>
+              <span className="text-[10px] text-ink/50 font-mono tracking-wider">WEEKLY GOAL</span>
+              <h2 className="font-mincho text-lg font-bold text-ink">今週の学習範囲を設定</h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-ink/40 hover:text-ink p-1.5 text-base transition-colors"
+              aria-label="閉じる"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* スクロール可能なフォーム領域 */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
+          {/* 単語範囲入力 */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-ink/70">単語の範囲（No.）</label>
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <span className="text-[10px] text-ink/40 mb-1 block">開始</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={startNum}
+                  onChange={(e) => setStartNum(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full px-3 py-2 border border-line rounded-lg bg-paper text-ink font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ink"
+                />
+              </div>
+              <span className="text-ink/40 pt-4">〜</span>
+              <div className="flex-1">
+                <span className="text-[10px] text-ink/40 mb-1 block">終了</span>
+                <input
+                  type="number"
+                  min={startNum}
+                  value={endNum}
+                  onChange={(e) => setEndNum(Math.max(startNum, parseInt(e.target.value) || startNum))}
+                  className="w-full px-3 py-2 border border-line rounded-lg bg-paper text-ink font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ink"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 1日の単語数 */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-ink/70">1日の進める単語数</label>
+            <div className="grid grid-cols-4 gap-2">
+              {[10, 15, 20, 30].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => setWordsPerDay(num)}
+                  className={\`py-2 text-xs font-mono rounded-lg border transition-all \${
+                    wordsPerDay === num
+                      ? "bg-ink text-paper border-ink font-bold"
+                      : "bg-paper text-ink border-line hover:bg-highlighter/10"
+                  }\`}
+                >
+                  {num}語
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* プレビュー表示パネル */}
+          <div className="pt-1">
+            <WeeklyPreviewPanel
+              days={preview?.days || []}
+              dailyAssignments={preview?.dailyAssignments || []}
+            />
+          </div>
+        </div>
+
+        {/* 下部固定アクションフッター（BottomNavに被らない安全配置） */}
+        <div className="p-4 border-t border-line bg-paper/95 rounded-b-2xl flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting || startNum > endNum}
+            className="w-full py-3 bg-ink text-paper rounded-xl font-medium text-sm hover:opacity-90 active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm"
+          >
+            {isSubmitting ? "保存中..." : "この範囲で決定する"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+`,
+
+  // 2. プレビューパネル (型安全性・空配列ハンドリングの堅牢化)
+  "components/weekly-range/WeeklyPreviewPanel.tsx": `"use client";
+
+interface DayAssignmentPreview {
+  date: string;
+  dayOfWeek: string;
+  rangeStart: number | null;
+  rangeEnd: number | null;
+  isReviewDay: boolean;
+}
+
+interface WeeklyPreviewPanelProps {
+  days: string[];
+  dailyAssignments: DayAssignmentPreview[];
+}
+
+export function WeeklyPreviewPanel({
+  days = [],
+  dailyAssignments = [],
+}: WeeklyPreviewPanelProps) {
+  if (!dailyAssignments || dailyAssignments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="p-3.5 bg-paper rounded-xl border border-line space-y-2">
+      <div className="text-xs font-medium text-ink/70 mb-1">
+        1週間の学習プラン（プレビュー）
+      </div>
+      <div className="space-y-1.5 max-h-36 overflow-y-auto">
+        {dailyAssignments.map((item, index) => {
+          const dateLabel = item.date ? item.date.slice(5).replace("-", "/") : "";
+          const dayName = item.dayOfWeek || (days[index] ? days[index].slice(5) : \`Day \${index + 1}\`);
+
+          return (
+            <div
+              key={index}
+              className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-paper/70 border border-line/40 font-mono"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-ink/50 w-10 text-[11px]">{dateLabel}</span>
+                <span className="font-medium text-ink">{dayName}</span>
+              </div>
+              <div>
+                {item.isReviewDay ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-highlighter/30 text-ink">
+                    復習日
+                  </span>
+                ) : (
+                  <span className="text-ink font-semibold">
+                    No. {item.rangeStart} - {item.rangeEnd}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+`,
+
+  // 3. ボトムナビゲーション (z-index を z-40 に統一)
+  "components/layout/BottomNav.tsx": `"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+export function BottomNav() {
+  const pathname = usePathname();
+
+  // /test 画面ではナビを非表示
+  if (pathname?.startsWith("/test")) {
+    return null;
+  }
+
+  const navItems = [
+    { label: "ホーム", href: "/dashboard", icon: "🏠" },
+    { label: "グループ", href: "/group", icon: "👥" },
+  ];
+
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-paper/95 border-t border-line backdrop-blur-sm">
+      <div className="max-w-lg mx-auto flex items-center justify-around h-16 px-4">
+        {navItems.map((item) => {
+          const isActive = pathname === item.href;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={\`flex flex-col items-center justify-center flex-1 py-1 transition-colors \${
+                isActive ? "text-ink font-bold" : "text-ink/40 hover:text-ink/70"
+              }\`}
+            >
+              <span className="text-base mb-0.5">{item.icon}</span>
+              <span className="text-[11px] tracking-tight">{item.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+`,
+
+  // 4. ダッシュボードの SetRangeCTA (モーダル接続の堅牢化)
+  "components/dashboard/SetRangeCTA.tsx": `"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { WeeklyRangeModal } from "@/components/weekly-range/WeeklyRangeModal";
+
+interface SetRangeCTAProps {
+  userId: string;
+  wordbookId?: string;
+  weekStartStr: string;
+}
+
+export function SetRangeCTA({
+  userId,
+  wordbookId,
+  weekStartStr,
+}: SetRangeCTAProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const router = useRouter();
+
+  if (!wordbookId) {
+    return (
+      <div className="p-6 border border-line rounded-2xl bg-paper text-center space-y-2">
+        <p className="text-sm text-ink/60">単語帳が選択されていません。</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="p-6 border border-line rounded-2xl bg-paper shadow-sm space-y-4">
+        <div className="space-y-1">
+          <span className="text-xs text-ink/60 font-mono">今週の学習プラン</span>
+          <h2 className="font-mincho text-lg font-bold text-ink">
+            今週の単語学習範囲を設定しましょう
+          </h2>
+          <p className="text-xs text-ink/60 leading-relaxed">
+            土曜日から始まる1週間の目標範囲を決めることで、毎日の確認テストが自動でスケジュールされます。
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+          className="w-full py-3.5 bg-ink text-paper rounded-xl font-medium text-sm hover:opacity-90 active:scale-[0.99] transition-all shadow-sm"
+        >
+          今週の範囲を設定する
+        </button>
+      </div>
+
+      <WeeklyRangeModal
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        userId={userId}
+        wordbookId={wordbookId}
+        weekStartStr={weekStartStr}
+        onSaved={() => {
+          router.refresh();
+        }}
+      />
+    </>
+  );
+}
+`,
+
+  // 5. 週間範囲保存 API (NextRequest / NextResponse / next/server 仕様準拠)
+  "app/api/weekly-ranges/route.ts": `import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { calculateWeeklyPreview } from "@/lib/assignment/calculateWeeklyPreview";
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      userId,
+      wordbookId,
+      weekStartDate,
+      rangeStart,
+      rangeEnd,
+      wordsPerDay,
+      pace,
+    } = body;
+
+    if (!userId || !wordbookId || !weekStartDate || !rangeStart || !rangeEnd) {
+      return NextResponse.json(
+        { error: "必須項目が不足しています" },
+        { status: 400 }
+      );
+    }
+
+    const supabase = await createClient();
+
+    // 1. weekly_ranges の保存・更新
+    const { data: rangeData, error: rangeError } = await supabase
+      .from("weekly_ranges")
+      .upsert(
+        {
+          user_id: userId,
+          wordbook_id: wordbookId,
+          week_start_date: weekStartDate,
+          range_start: rangeStart,
+          range_end: rangeEnd,
+        },
+        { onConflict: "user_id,week_start_date" }
+      )
+      .select()
+      .single();
+
+    if (rangeError) {
+      console.error("Failed to upsert weekly_range:", rangeError);
+      return NextResponse.json(
+        { error: "週間範囲の保存に失敗しました" },
+        { status: 500 }
+      );
+    }
+
+    // 2. 7日間の日次割当（daily_assignments）を計算して一括作成/更新
+    const preview = calculateWeeklyPreview({
+      rangeStart,
+      rangeEnd,
+      wordsPerDay: wordsPerDay || 20,
+      pace: pace || "standard",
+      weekStartDateSaturday: weekStartDate,
+    });
+
+    const dailyRows = preview.dailyAssignments.map((item) => ({
+      user_id: userId,
+      wordbook_id: wordbookId,
+      date: item.date,
+      range_start: item.rangeStart,
+      range_end: item.rangeEnd,
+      is_review_day: item.isReviewDay,
+    }));
+
+    // 既存の同週割当を更新
+    const { error: assignError } = await supabase
+      .from("daily_assignments")
+      .upsert(dailyRows, { onConflict: "user_id,date" });
+
+    if (assignError) {
+      console.error("Failed to upsert daily_assignments:", assignError);
+      return NextResponse.json(
+        { error: "日次割当の作成に失敗しました" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true, range: rangeData });
+  } catch (error: any) {
+    console.error("POST /api/weekly-ranges exception:", error);
+    return NextResponse.json(
+      { error: error.message || "予期しないエラーが発生しました" },
+      { status: 500 }
+    );
+  }
+}
+`,
+};
+
+function main() {
+  console.log("=== Fixing Weekly Range & Navigation Bar Conflict ===");
+  for (const [filePath, content] of Object.entries(files)) {
+    const fullPath = path.join(process.cwd(), filePath);
+    const dir = path.dirname(fullPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(fullPath, content.trim() + "\n", "utf8");
+    console.log(`[Fixed/Updated] ${filePath}`);
+  }
+  console.log("=== Fix Complete! Successfully resolved layout conflict. ===");
+}
+
+main();

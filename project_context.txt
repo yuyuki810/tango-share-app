@@ -1,0 +1,5335 @@
+=== CURRENT PROJECT CODE DUMP ===
+
+// ==========================================
+// FILE: lib/assignment/buildDailyAssignmentRows.ts
+// ==========================================
+import type { PreviewDay } from './calculateWeeklyPreview';
+
+export interface DailyAssignmentRow {
+  user_id: string;
+  wordbook_id: string;
+  date: string;
+  range_start: number;
+  range_end: number;
+  is_review_day: boolean;
+}
+
+export function buildDailyAssignmentRows(
+  days: PreviewDay[],
+  userId: string,
+  wordbookId: string
+): DailyAssignmentRow[] {
+  return days
+    .filter((d) => d.type !== 'off' && d.rangeStart !== null && d.rangeEnd !== null)
+    .map((d) => ({
+      user_id: userId,
+      wordbook_id: wordbookId,
+      date: d.date,
+      range_start: d.rangeStart as number,
+      range_end: d.rangeEnd as number,
+      is_review_day: d.type === 'review',
+    }));
+}
+
+
+// ==========================================
+// FILE: lib/assignment/calculateWeeklyPreview.ts
+// ==========================================
+import { getWeekDates, getWeekStartSaturday } from "./weekDates";
+
+export type AssignmentType = "advance" | "review" | "final_review";
+
+export interface DailyAssignmentPreview {
+  date: string;
+  dayLabel: string;
+  type: AssignmentType;
+  rangeStart: number;
+  rangeEnd: number;
+  isReviewDay: boolean;
+  count: number;
+}
+
+export interface WeeklyPreviewResult {
+  weekStartDate: string;
+  rangeStart: number;
+  rangeEnd: number;
+  totalWordsAssigned: number;
+  days: DailyAssignmentPreview[];
+  dailyAssignments: DailyAssignmentPreview[];
+}
+
+export function getCycleWeekDates(weekStartDateSaturday?: string): string[] {
+  const safeSaturday = weekStartDateSaturday || getWeekStartSaturday();
+  return getWeekDates(safeSaturday);
+}
+
+/**
+ * 週間学習プレビューの計算
+ */
+export function calculateWeeklyPreview(
+  arg1: number | { rangeStart: number; wordsPerDay: number; totalWords?: number; weekStartDateSaturday?: string; weekStartDate?: string },
+  arg2?: number,
+  arg3?: number,
+  arg4?: string
+): WeeklyPreviewResult {
+  let rangeStart = 1;
+  let wordsPerDay = 20;
+  let totalWordsInBook = 2000;
+  let weekStartDateSaturday: string | undefined = undefined;
+
+  if (typeof arg1 === "object" && arg1 !== null) {
+    rangeStart = arg1.rangeStart ?? 1;
+    wordsPerDay = arg1.wordsPerDay ?? 20;
+    totalWordsInBook = arg1.totalWords ?? 2000;
+    weekStartDateSaturday = arg1.weekStartDateSaturday ?? arg1.weekStartDate;
+  } else {
+    rangeStart = typeof arg1 === "number" ? arg1 : 1;
+    wordsPerDay = typeof arg2 === "number" ? arg2 : 20;
+    totalWordsInBook = typeof arg3 === "number" ? arg3 : 2000;
+    weekStartDateSaturday = arg4;
+  }
+
+  const safeSaturday = weekStartDateSaturday || getWeekStartSaturday();
+  const dates = getCycleWeekDates(safeSaturday);
+
+  const DAY_LABELS = ["土", "日", "月", "火", "水", "木", "金"];
+  const daysList: DailyAssignmentPreview[] = [];
+
+  let currentStart = rangeStart;
+  let overallStart = rangeStart;
+  let overallEnd = rangeStart;
+
+  // Day 1〜4: 進める日 (advance)
+  for (let i = 0; i < 4; i++) {
+    const start = Math.min(currentStart, totalWordsInBook);
+    const end = Math.min(currentStart + wordsPerDay - 1, totalWordsInBook);
+    overallEnd = Math.max(overallEnd, end);
+
+    daysList.push({
+      date: dates[i] || "",
+      dayLabel: DAY_LABELS[i] || "",
+      type: "advance",
+      rangeStart: start,
+      rangeEnd: end,
+      isReviewDay: false,
+      count: Math.max(0, end - start + 1),
+    });
+
+    currentStart = end + 1;
+  }
+
+  // Day 5〜6: 復習日 (review)
+  for (let i = 4; i < 6; i++) {
+    daysList.push({
+      date: dates[i] || "",
+      dayLabel: DAY_LABELS[i] || "",
+      type: "review",
+      rangeStart: overallStart,
+      rangeEnd: overallEnd,
+      isReviewDay: true,
+      count: Math.max(0, overallEnd - overallStart + 1),
+    });
+  }
+
+  // Day 7: 総復習日 (final_review)
+  daysList.push({
+    date: dates[6] || "",
+    dayLabel: DAY_LABELS[6] || "",
+    type: "final_review",
+    rangeStart: overallStart,
+    rangeEnd: overallEnd,
+    isReviewDay: true,
+    count: Math.max(0, overallEnd - overallStart + 1),
+  });
+
+  return {
+    weekStartDate: safeSaturday,
+    rangeStart: overallStart,
+    rangeEnd: overallEnd,
+    totalWordsAssigned: Math.max(0, overallEnd - overallStart + 1),
+    days: daysList,
+    dailyAssignments: daysList,
+  };
+}
+
+
+// ==========================================
+// FILE: lib/assignment/cycleTypes.ts
+// ==========================================
+export type DayType = 'new' | 'review' | 'off';
+export type CycleType = 'five_two' | 'four_three' | 'custom';
+
+export const CYCLE_DAY_LABELS = ['土', '日', '月', '火', '水', '木', '金'] as const;
+
+const FIVE_TWO: DayType[] = ['new', 'new', 'new', 'new', 'new', 'review', 'review'];
+const FOUR_THREE: DayType[] = ['new', 'new', 'new', 'new', 'review', 'review', 'review'];
+
+export function resolveDayTypes(cycleType: CycleType, customDayTypes?: DayType[]): DayType[] {
+  if (cycleType === 'five_two') return FIVE_TWO;
+  if (cycleType === 'four_three') return FOUR_THREE;
+  if (cycleType === 'custom') {
+    if (!customDayTypes || customDayTypes.length !== 7) {
+      throw new Error('カスタムサイクルには7日分の設定が必要です');
+    }
+    return customDayTypes;
+  }
+  throw new Error(`不明な cycleType: ${cycleType}`);
+}
+
+
+// ==========================================
+// FILE: lib/assignment/generateDailyAssignments.ts
+// ==========================================
+import { getWeekDates } from './weekDates';
+
+export type DayType = 'learn' | 'review' | 'off';
+
+export interface DayScheduleConfig {
+  dayIndex: number; // 0=土, 1=日, 2=月, 3=火, 4=水, 5=木, 6=金
+  type: DayType;
+}
+
+export interface DailyAssignmentRow {
+  user_id: string;
+  wordbook_id: string;
+  date: string; // YYYY-MM-DD
+  range_start: number;
+  range_end: number;
+  is_review_day: boolean;
+}
+
+export interface GenerateAssignmentParams {
+  userId: string;
+  wordbookId: string;
+  weekStartDate: string; // 土曜日の日付 YYYY-MM-DD
+  rangeStart: number;
+  wordsPerDay: number;
+  patternType?: '5_2' | '4_3' | 'custom';
+  customDays?: DayType[]; // 長さ7の配列 (土〜金)
+  maxWordsLimit?: number; // 単語帳の total_words
+}
+
+/**
+ * 週間計画から各曜日の割当(daily_assignments)を生成する
+ */
+export function generateDailyAssignmentRows(
+  params: GenerateAssignmentParams
+): { rows: DailyAssignmentRow[]; calculatedRangeEnd: number; totalWords: number } {
+  const {
+    userId,
+    wordbookId,
+    weekStartDate,
+    rangeStart,
+    wordsPerDay,
+    patternType = '5_2',
+    customDays,
+    maxWordsLimit = Infinity,
+  } = params;
+
+  const weekDates = getWeekDates(weekStartDate);
+
+  // 曜日ごとのタイプ決定 (土〜金)
+  let dayTypes: DayType[] = ['learn', 'learn', 'learn', 'learn', 'learn', 'review', 'review'];
+
+  if (patternType === '4_3') {
+    dayTypes = ['learn', 'learn', 'learn', 'learn', 'review', 'review', 'review'];
+  } else if (patternType === 'custom' && customDays && customDays.length === 7) {
+    dayTypes = customDays;
+  }
+
+  const rows: DailyAssignmentRow[] = [];
+  let currentStart = rangeStart;
+  const learnDayIndices: number[] = [];
+
+  // 1. 新規学習日の割り当て
+  dayTypes.forEach((type, index) => {
+    if (type === 'learn') {
+      learnDayIndices.push(index);
+      const start = currentStart;
+      let end = start + wordsPerDay - 1;
+      if (end > maxWordsLimit) {
+        end = maxWordsLimit;
+      }
+      if (start <= maxWordsLimit) {
+        rows.push({
+          user_id: userId,
+          wordbook_id: wordbookId,
+          date: weekDates[index],
+          range_start: start,
+          range_end: end,
+          is_review_day: false,
+        });
+      }
+      currentStart = end + 1;
+    }
+  });
+
+  const calculatedRangeEnd = Math.min(
+    maxWordsLimit,
+    Math.max(rangeStart, currentStart - 1)
+  );
+  const totalWords = Math.max(0, calculatedRangeEnd - rangeStart + 1);
+
+  // 2. 復習日の割り当て（今週進んだ範囲全体を復習）
+  dayTypes.forEach((type, index) => {
+    if (type === 'review' && totalWords > 0) {
+      rows.push({
+        user_id: userId,
+        wordbook_id: wordbookId,
+        date: weekDates[index],
+        range_start: rangeStart,
+        range_end: calculatedRangeEnd,
+        is_review_day: true,
+      });
+    }
+  });
+
+  // 日付順にソート
+  rows.sort((a, b) => a.date.localeCompare(b.date));
+
+  return { rows, calculatedRangeEnd, totalWords };
+}
+
+
+// ==========================================
+// FILE: lib/assignment/weekDates.ts
+// ==========================================
+/**
+ * JST基準の日付計算・土曜開始週の管理ユーティリティ
+ */
+
+// JST (UTC+9) の現在日時を取得
+export function getTodayJST(): Date {
+  const now = new Date();
+  // UTCミリ秒 + 9時間
+  const jstTime = now.getTime() + (9 * 60 + now.getTimezoneOffset()) * 60 * 1000;
+  return new Date(jstTime);
+}
+
+// JST基準の YYYY-MM-DD 文字列を取得
+export function getJSTTodayString(): string {
+  const jst = getTodayJST();
+  const year = jst.getFullYear();
+  const month = String(jst.getMonth() + 1).padStart(2, "0");
+  const day = String(jst.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+// 表記揺れ・後方互換用エイリアス
+export const toJSTDateString = getJSTTodayString;
+
+// 直近の土曜日（週の開始日）の YYYY-MM-DD を取得
+export function getWeekStartSaturday(baseDate: Date = getTodayJST()): string {
+  const d = new Date(baseDate);
+  const dayOfWeek = d.getDay(); // 0(日) - 6(土)
+  // 土曜日(6)起点でのオフセット計算
+  const diffToSaturday = (dayOfWeek + 1) % 7;
+  d.setDate(d.getDate() - diffToSaturday);
+  
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+// 週7日間の日付配列 (YYYY-MM-DD) と開始/終了日を取得
+export function getWeekDates(baseDate: Date = getTodayJST()) {
+  const weekStartStr = getWeekStartSaturday(baseDate);
+  const [sy, sm, sd] = weekStartStr.split("-").map(Number);
+  
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(sy, sm - 1, sd + i);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const date = String(d.getDate()).padStart(2, "0");
+    days.push(`${y}-${m}-${date}`);
+  }
+
+  return {
+    weekStartStr,
+    weekEndStr: days[6],
+    days,
+  };
+}
+
+export const DAY_LABELS_SAT = ["土", "日", "月", "火", "水", "木", "金"] as const;
+
+
+// ==========================================
+// FILE: lib/srs/buildReviewQueue.ts
+// ==========================================
+import { ReviewQueueItem } from './types';
+
+interface DueReviewItem {
+  id: string;
+  stage: number;
+  ease_factor: number;
+  wrong_count: number;
+  interval_days: number;
+  words: {
+    id: string;
+    word: string;
+    meaning: string;
+    pronunciation?: string | null;
+    example_sentences?: Array<{ text: string; translation?: string | null }>;
+  };
+}
+
+interface NewWordCandidate {
+  id: string;
+  word: string;
+  meaning: string;
+  pronunciation?: string | null;
+  example_sentences?: Array<{ text: string; translation?: string | null }>;
+}
+
+export function generate4Choices(
+  correctMeaning: string,
+  distractorPool: string[]
+): { choices: string[]; correctChoiceIndex: number } {
+  const filtered = distractorPool.filter((m) => m && m !== correctMeaning);
+  const shuffled = [...filtered].sort(() => Math.random() - 0.5);
+  const selectedDistractors = shuffled.slice(0, 3);
+
+  const fallback = [
+    '考慮する・検討する',
+    '維持する・継続する',
+    '達成する・成し遂げる',
+    '要求する・必要とする',
+    '改善する・向上させる',
+  ];
+  let fallbackIdx = 0;
+  while (selectedDistractors.length < 3) {
+    const candidate = fallback[fallbackIdx % fallback.length];
+    if (candidate !== correctMeaning && !selectedDistractors.includes(candidate)) {
+      selectedDistractors.push(candidate);
+    }
+    fallbackIdx++;
+  }
+
+  const choices = [correctMeaning, ...selectedDistractors].sort(() => Math.random() - 0.5);
+  const correctChoiceIndex = choices.indexOf(correctMeaning);
+  return { choices, correctChoiceIndex };
+}
+
+export function buildInterleavedQueue(
+  dueReviews: DueReviewItem[],
+  newCandidates: NewWordCandidate[],
+  distractorPool: string[],
+  maxTotal = 20
+): ReviewQueueItem[] {
+  const queue: ReviewQueueItem[] = [];
+  let rIdx = 0;
+  let nIdx = 0;
+
+  while (
+    (rIdx < dueReviews.length || nIdx < newCandidates.length) &&
+    queue.length < maxTotal
+  ) {
+    let reviewsAdded = 0;
+    while (rIdx < dueReviews.length && reviewsAdded < 4 && queue.length < maxTotal) {
+      const item = dueReviews[rIdx];
+      const ex = item.words?.example_sentences?.[0] || null;
+      queue.push({
+        queueId: `review-${item.words.id}-${Date.now()}-${Math.random()}`,
+        wordId: item.words.id,
+        word: item.words.word,
+        meaning: item.words.meaning,
+        pronunciation: item.words.pronunciation,
+        format: 'review',
+        exampleSentence: ex ? { text: ex.text, translation: ex.translation } : null,
+        stage: item.stage,
+        easeFactor: item.ease_factor,
+        wrongCount: item.wrong_count,
+      });
+      rIdx++;
+      reviewsAdded++;
+    }
+
+    if (nIdx < newCandidates.length && queue.length < maxTotal) {
+      const nItem = newCandidates[nIdx];
+      const ex = nItem.example_sentences?.[0] || null;
+      const { choices, correctChoiceIndex } = generate4Choices(nItem.meaning, distractorPool);
+      queue.push({
+        queueId: `new-${nItem.id}-${Date.now()}-${Math.random()}`,
+        wordId: nItem.id,
+        word: nItem.word,
+        meaning: nItem.meaning,
+        pronunciation: nItem.pronunciation,
+        format: 'new',
+        exampleSentence: ex ? { text: ex.text, translation: ex.translation } : null,
+        choices,
+        correctChoiceIndex,
+      });
+      nIdx++;
+    }
+
+    if (rIdx >= dueReviews.length && nIdx < newCandidates.length) {
+      while (nIdx < newCandidates.length && queue.length < maxTotal) {
+        const nItem = newCandidates[nIdx];
+        const ex = nItem.example_sentences?.[0] || null;
+        const { choices, correctChoiceIndex } = generate4Choices(nItem.meaning, distractorPool);
+        queue.push({
+          queueId: `new-${nItem.id}-${Date.now()}-${Math.random()}`,
+          wordId: nItem.id,
+          word: nItem.word,
+          meaning: nItem.meaning,
+          pronunciation: nItem.pronunciation,
+          format: 'new',
+          exampleSentence: ex ? { text: ex.text, translation: ex.translation } : null,
+          choices,
+          correctChoiceIndex,
+        });
+        nIdx++;
+      }
+    }
+  }
+
+  return queue;
+}
+
+export function insertRetryItem(
+  currentQueue: ReviewQueueItem[],
+  currentIndex: number,
+  distractorPool: string[]
+): ReviewQueueItem[] {
+  const currentItem = currentQueue[currentIndex];
+  if (!currentItem) return currentQueue;
+
+  const retryItem: ReviewQueueItem = {
+    ...currentItem,
+    queueId: `${currentItem.wordId}-retry-${Date.now()}`,
+    isRetry: true,
+  };
+
+  if (retryItem.format === 'new') {
+    const { choices, correctChoiceIndex } = generate4Choices(retryItem.meaning, distractorPool);
+    retryItem.choices = choices;
+    retryItem.correctChoiceIndex = correctChoiceIndex;
+  }
+
+  const offset = 5 + Math.floor(Math.random() * 5);
+  const targetIndex = currentIndex + 1 + offset;
+
+  const newQueue = [...currentQueue];
+  if (targetIndex >= newQueue.length) {
+    newQueue.push(retryItem);
+  } else {
+    newQueue.splice(targetIndex, 0, retryItem);
+  }
+  return newQueue;
+}
+
+
+// ==========================================
+// FILE: lib/srs/dates.ts
+// ==========================================
+export function getTodayJST(): string {
+  const now = new Date();
+  const jstFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return jstFormatter.format(now);
+}
+
+export function addDaysJST(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d + days, 0, 0, 0));
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function isYesterdayJST(prevDateStr: string | null, todayStr: string): boolean {
+  if (!prevDateStr) return false;
+  return prevDateStr === addDaysJST(todayStr, -1);
+}
+
+
+// ==========================================
+// FILE: lib/srs/homeState.ts
+// ==========================================
+import { SupabaseClient } from '@supabase/supabase-js';
+import { getTodayJST } from './dates';
+import { HomeStateMachine } from './types';
+
+export async function evaluateHomeState(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<HomeStateMachine> {
+  const todayJst = getTodayJST();
+
+  const { data: weeklyRange } = await supabase
+    .from('weekly_ranges')
+    .select('id, wordbook_id, start_date, end_date')
+    .eq('user_id', userId)
+    .lte('start_date', todayJst)
+    .gte('end_date', todayJst)
+    .maybeSingle();
+
+  if (!weeklyRange) {
+    return { state: 'no_range' };
+  }
+
+  const { count: dueReviewCount } = await supabase
+    .from('word_progress')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('is_in_srs', true)
+    .lte('next_review_at', todayJst);
+
+  const { data: assignment } = await supabase
+    .from('daily_assignments')
+    .select('start_number, end_number, is_review_day')
+    .eq('user_id', userId)
+    .eq('date', todayJst)
+    .maybeSingle();
+
+  let unintroducedCount = 0;
+  if (assignment && !assignment.is_review_day && assignment.start_number && assignment.end_number) {
+    const { data: rangeWords } = await supabase
+      .from('words')
+      .select('id')
+      .eq('wordbook_id', weeklyRange.wordbook_id)
+      .gte('number', assignment.start_number)
+      .lte('number', assignment.end_number);
+
+    if (rangeWords && rangeWords.length > 0) {
+      const wordIds = rangeWords.map((w) => w.id);
+      const { data: progressWords } = await supabase
+        .from('word_progress')
+        .select('word_id')
+        .eq('user_id', userId)
+        .in('word_id', wordIds);
+
+      const progressWordIds = new Set(progressWords?.map((p) => p.word_id) || []);
+      unintroducedCount = wordIds.filter((id) => !progressWordIds.has(id)).length;
+    }
+  }
+
+  const reviewDueTotal = dueReviewCount || 0;
+  const newCandidateCount = Math.min(unintroducedCount, 20);
+  const sessionCount = Math.min(reviewDueTotal + newCandidateCount, 20);
+
+  const { count: todayIntroducedCount } = await supabase
+    .from('daily_new_words')
+    .select('word_id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('date', todayJst);
+
+  const { data: dailyCheckSession } = await supabase
+    .from('test_sessions')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('type', 'daily_check')
+    .gte('created_at', `${todayJst}T00:00:00+09:00`)
+    .lte('created_at', `${todayJst}T23:59:59+09:00`)
+    .maybeSingle();
+
+  const dailyCheckDone = !!dailyCheckSession;
+  const introducedCount = todayIntroducedCount || 0;
+
+  const { data: streakRow } = await supabase
+    .from('streaks')
+    .select('current_streak, longest_streak')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (sessionCount > 0) {
+    return {
+      state: 'review_due',
+      sessionCount,
+      dueReviewCount: reviewDueTotal,
+      todayNewCount: newCandidateCount,
+    };
+  }
+
+  if (introducedCount > 0 && !dailyCheckDone) {
+    return {
+      state: 'daily_check_due',
+      count: introducedCount,
+    };
+  }
+
+  const { count: remainingAssignments } = await supabase
+    .from('daily_assignments')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gt('date', todayJst)
+    .eq('is_review_day', false);
+
+  return {
+    state: 'completed',
+    streak: streakRow?.current_streak || 0,
+    longestStreak: streakRow?.longest_streak || 0,
+    hasAheadContent: (remainingAssignments || 0) > 0,
+  };
+}
+
+
+// ==========================================
+// FILE: lib/srs/onAnswer.ts
+// ==========================================
+import { addDaysJST } from './dates';
+
+export const FIXED_INTERVAL_TABLE = [0, 1, 3, 7, 14, 30, 90] as const;
+
+export interface SrsCalculationInput {
+  stage: number;
+  easeFactor: number;
+  intervalDays: number;
+  correctStreak: number;
+  wrongCount: number;
+}
+
+export interface SrsCalculationOutput {
+  stage: number;
+  easeFactor: number;
+  intervalDays: number;
+  correctStreak: number;
+  wrongCount: number;
+  nextReviewAt: string;
+}
+
+export function calculateSrsUpdate(
+  current: SrsCalculationInput,
+  isCorrect: boolean,
+  todayJst: string
+): SrsCalculationOutput {
+  let stage = current.stage;
+  let easeFactor = current.easeFactor;
+  let intervalDays = current.intervalDays;
+  let correctStreak = current.correctStreak;
+  let wrongCount = current.wrongCount;
+
+  if (isCorrect) {
+    stage = Math.min(stage + 1, 6);
+    if (stage <= 2) {
+      intervalDays = FIXED_INTERVAL_TABLE[stage];
+    } else {
+      intervalDays = Math.round(intervalDays * easeFactor);
+    }
+    easeFactor = Math.min(easeFactor + 0.05, 2.8);
+    correctStreak += 1;
+  } else {
+    stage = Math.max(stage - 2, 0);
+    intervalDays = 1;
+    easeFactor = Math.max(easeFactor - 0.2, 1.3);
+    correctStreak = 0;
+    wrongCount += 1;
+  }
+
+  easeFactor = Math.round(easeFactor * 100) / 100;
+  const calculatedInterval = Math.max(1, Math.round(intervalDays));
+  const nextReviewAt = addDaysJST(todayJst, calculatedInterval);
+
+  return {
+    stage,
+    easeFactor,
+    intervalDays: calculatedInterval,
+    correctStreak,
+    wrongCount,
+    nextReviewAt,
+  };
+}
+
+
+// ==========================================
+// FILE: lib/srs/types.ts
+// ==========================================
+export interface WordItem {
+  id: string;
+  wordbook_id: string;
+  number: number;
+  word: string;
+  meaning: string;
+  pronunciation?: string | null;
+  frequency_rank?: number | null;
+  is_writing_target?: boolean;
+}
+
+export interface ExampleSentence {
+  id: string;
+  word_id: string;
+  text: string;
+  translation?: string | null;
+}
+
+export interface WordProgress {
+  id: string;
+  user_id: string;
+  word_id: string;
+  stage: number;
+  ease_factor: number;
+  interval_days: number;
+  next_review_at: string | null;
+  correct_streak: number;
+  wrong_count: number;
+  last_reviewed_at: string | null;
+  exposure_count: number;
+  is_in_srs: boolean;
+}
+
+export interface ReviewQueueItem {
+  queueId: string;
+  wordId: string;
+  word: string;
+  meaning: string;
+  pronunciation?: string | null;
+  format: 'new' | 'review';
+  exampleSentence?: {
+    text: string;
+    translation?: string | null;
+  } | null;
+  choices?: string[];
+  correctChoiceIndex?: number;
+  stage?: number;
+  easeFactor?: number;
+  wrongCount?: number;
+  isRetry?: boolean;
+}
+
+export type HomeStateMachine =
+  | { state: 'no_range' }
+  | { state: 'review_due'; sessionCount: number; dueReviewCount: number; todayNewCount: number }
+  | { state: 'daily_check_due'; count: number }
+  | { state: 'completed'; streak: number; longestStreak: number; hasAheadContent: boolean };
+
+
+// ==========================================
+// FILE: lib/streak/updateStreak.ts
+// ==========================================
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getYesterday } from '@/lib/assignment/weekDates';
+
+export async function updateStreak(
+  supabase: SupabaseClient,
+  userId: string,
+  today: string
+): Promise<void> {
+  const { data: streak } = await supabase
+    .from('streaks')
+    .select('current_streak, longest_streak, last_active_date')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!streak) {
+    await supabase.from('streaks').insert({
+      user_id: userId,
+      current_streak: 1,
+      longest_streak: 1,
+      last_active_date: today,
+    });
+    return;
+  }
+
+  if (streak.last_active_date === today) return;
+
+  const isConsecutive = streak.last_active_date === getYesterday(today);
+  const nextCurrent = isConsecutive ? streak.current_streak + 1 : 1;
+
+  await supabase
+    .from('streaks')
+    .update({
+      current_streak: nextCurrent,
+      longest_streak: Math.max(streak.longest_streak, nextCurrent),
+      last_active_date: today,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+}
+
+
+// ==========================================
+// FILE: lib/supabase/client.ts
+// ==========================================
+import { createBrowserClient } from "@supabase/ssr";
+
+export function createClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+}
+
+
+// ==========================================
+// FILE: lib/supabase/server.ts
+// ==========================================
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+export async function createClient() {
+  const cookieStore = await cookies();
+
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Server Component からの呼び出し時は無視
+          }
+        },
+      },
+    }
+  );
+}
+
+
+// ==========================================
+// FILE: lib/supabase/testMigrations.sql
+// ==========================================
+-- フェーズ3用 マイグレーションSQL (SupabaseのSQLエディタで実行してください)
+
+-- daily_assignments拡張
+alter table daily_assignments
+  add column if not exists is_completed boolean default false,
+  add column if not exists completed_at timestamptz;
+
+-- word_progress (SRS管理)
+create table if not exists word_progress (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id),
+  word_id uuid references words(id),
+  stage int default 0,
+  ease_factor numeric default 2.5,
+  interval_days numeric default 0,
+  next_review_at timestamptz default now(),
+  correct_streak int default 0,
+  wrong_count int default 0,
+  last_reviewed_at timestamptz,
+  unique(user_id, word_id)
+);
+
+-- streaks (継続日数)
+create table if not exists streaks (
+  user_id uuid primary key references auth.users(id),
+  current_streak int default 0,
+  longest_streak int default 0,
+  last_active_date date
+);
+
+-- セキュリティポリシー (RLS)
+alter table word_progress enable row level security;
+alter table streaks enable row level security;
+
+create policy "Users can view their own word progress" on word_progress for select using (auth.uid() = user_id);
+create policy "Users can insert their own word progress" on word_progress for insert with check (auth.uid() = user_id);
+create policy "Users can update their own word progress" on word_progress for update using (auth.uid() = user_id);
+
+create policy "Users can view their own streaks" on streaks for select using (auth.uid() = user_id);
+create policy "Users can insert their own streaks" on streaks for insert with check (auth.uid() = user_id);
+create policy "Users can update their own streaks" on streaks for update using (auth.uid() = user_id);
+
+
+// ==========================================
+// FILE: lib/test/getTodayTestWords.ts
+// ==========================================
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+export interface TestWordCard {
+  wordId: string;
+  headword: string;
+  pronunciation?: string;
+  meaning: string;
+  studyCount: number;
+}
+
+export interface TodayTestContext {
+  dailyAssignmentId: string;
+  wordbookId: string;
+  isReviewDay: boolean;
+  rangeStart: number;
+  rangeEnd: number;
+  cards: TestWordCard[];
+}
+
+export async function getTodayTestContext(
+  supabase: SupabaseClient,
+  userId: string,
+  today: string // YYYY-MM-DD
+): Promise<TodayTestContext | null> {
+  const { data: assignment } = await supabase
+    .from('daily_assignments')
+    .select('id, wordbook_id, range_start, range_end, is_review_day')
+    .eq('user_id', userId)
+    .eq('date', today)
+    .maybeSingle();
+
+  if (!assignment) return null;
+
+  const { data: words } = await supabase
+    .from('words')
+    .select('id, word, pronunciation, meaning, number')
+    .eq('wordbook_id', assignment.wordbook_id)
+    .gte('number', assignment.range_start)
+    .lte('number', assignment.range_end)
+    .order('number', { ascending: true });
+
+  const wordList = words ?? [];
+  const studyCounts = await getStudyCounts(
+    supabase,
+    userId,
+    wordList.map((w) => w.id)
+  );
+
+  const cards: TestWordCard[] = wordList.map((w) => ({
+    wordId: w.id,
+    headword: w.word,
+    pronunciation: w.pronunciation ?? undefined,
+    meaning: w.meaning,
+    studyCount: studyCounts.get(w.id) ?? 0,
+  }));
+
+  return {
+    dailyAssignmentId: assignment.id,
+    wordbookId: assignment.wordbook_id,
+    isReviewDay: assignment.is_review_day,
+    rangeStart: assignment.range_start,
+    rangeEnd: assignment.range_end,
+    cards,
+  };
+}
+
+async function getStudyCounts(
+  supabase: SupabaseClient,
+  userId: string,
+  wordIds: string[]
+): Promise<Map<string, number>> {
+  if (wordIds.length === 0) return new Map();
+
+  const { data } = await supabase
+    .from('test_answers')
+    .select('word_id, test_sessions!inner(user_id)')
+    .eq('test_sessions.user_id', userId)
+    .in('word_id', wordIds);
+
+  const counts = new Map<string, number>();
+  (data ?? []).forEach((row: { word_id: string }) => {
+    counts.set(row.word_id, (counts.get(row.word_id) ?? 0) + 1);
+  });
+  return counts;
+}
+
+
+// ==========================================
+// FILE: lib/test/resolveOriginAssignment.ts
+// ==========================================
+import { createClient } from "@/lib/supabase/server";
+
+export async function resolveOriginAssignment(
+  userId: string,
+  wordbookId: string,
+  wordIds: string[]
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!wordIds || wordIds.length === 0) return map;
+
+  const supabase = await createClient();
+
+  const { data: words, error: wordsError } = await supabase
+    .from("words")
+    .select("id, number")
+    .in("id", wordIds);
+
+  if (wordsError || !words || words.length === 0) {
+    return map;
+  }
+
+  const { data: assignments, error: assignError } = await supabase
+    .from("daily_assignments")
+    .select("id, range_start, range_end")
+    .eq("user_id", userId)
+    .eq("wordbook_id", wordbookId)
+    .eq("is_review_day", false);
+
+  if (assignError || !assignments || assignments.length === 0) {
+    return map;
+  }
+
+  for (const word of words) {
+    const matched = assignments.find(
+      (a) => word.number >= a.range_start && word.number <= a.range_end
+    );
+    if (matched) {
+      map.set(word.id, matched.id);
+    }
+  }
+
+  return map;
+}
+
+
+// ==========================================
+// FILE: lib/weakness/computeChunkStats.ts
+// ==========================================
+import { createClient } from "@/lib/supabase/server";
+
+export interface ChunkHistory {
+  testDate: string;
+  mistakeRate: number;
+}
+
+export interface ChunkMistakenWord {
+  wordId: string;
+  word: string;
+  meaning: string;
+  pronunciation?: string;
+  mistakeCount: number;
+  totalAttempts: number;
+}
+
+export interface ChunkStat {
+  chunkId: string;        // daily_assignments.id (進める日)
+  rangeStart: number;
+  rangeEnd: number;
+  originDate: string;     // その進める日の日付 (YYYY-MM-DD)
+  totalAttempts: number;  // このチャンクの単語が解答された延べ回数
+  mistakeCount: number;
+  mistakeRate: number;    // 0〜1
+  history: ChunkHistory[]; // 時系列 (古い→新しい)
+  needsAttention: boolean;
+  mistakenWords: ChunkMistakenWord[];
+}
+
+export async function computeChunkStats(
+  userId: string,
+  wordbookId: string
+): Promise<ChunkStat[]> {
+  const supabase = await createClient();
+
+  const { data: chunks, error: chunkError } = await supabase
+    .from("daily_assignments")
+    .select("id, date, range_start, range_end")
+    .eq("user_id", userId)
+    .eq("wordbook_id", wordbookId)
+    .eq("is_review_day", false)
+    .order("date", { ascending: true })
+    .order("range_start", { ascending: true });
+
+  if (chunkError || !chunks || chunks.length === 0) {
+    return [];
+  }
+
+  const chunkIds = chunks.map((c) => c.id);
+
+  const { data: answers, error: answerError } = await supabase
+    .from("test_answers")
+    .select(`
+      id,
+      word_id,
+      is_known,
+      origin_daily_assignment_id,
+      test_sessions!inner (
+        id,
+        user_id,
+        date
+      ),
+      words (
+        id,
+        number,
+        word,
+        meaning,
+        pronunciation
+      )
+    `)
+    .eq("test_sessions.user_id", userId)
+    .in("origin_daily_assignment_id", chunkIds);
+
+  if (answerError) {
+    console.error("Failed to fetch test_answers for chunk stats:", answerError);
+    return chunks.map((c) => ({
+      chunkId: c.id,
+      rangeStart: c.range_start,
+      rangeEnd: c.range_end,
+      originDate: c.date,
+      totalAttempts: 0,
+      mistakeCount: 0,
+      mistakeRate: 0,
+      history: [],
+      needsAttention: false,
+      mistakenWords: [],
+    }));
+  }
+
+  type AnswerRow = NonNullable<typeof answers>[number];
+  const answersByChunk = new Map<string, AnswerRow[]>();
+  for (const chunk of chunks) {
+    answersByChunk.set(chunk.id, []);
+  }
+
+  for (const ans of answers || []) {
+    if (ans.origin_daily_assignment_id && answersByChunk.has(ans.origin_daily_assignment_id)) {
+      answersByChunk.get(ans.origin_daily_assignment_id)!.push(ans);
+    }
+  }
+
+  const result: ChunkStat[] = [];
+
+  for (const chunk of chunks) {
+    const chunkAnswers = answersByChunk.get(chunk.id) || [];
+    const totalAttempts = chunkAnswers.length;
+    const mistakeCount = chunkAnswers.filter((a) => !a.is_known).length;
+    const mistakeRate = totalAttempts > 0 ? mistakeCount / totalAttempts : 0;
+
+    const answersByDate = new Map<string, AnswerRow[]>();
+    for (const ans of chunkAnswers) {
+      const session = ans.test_sessions as unknown as { date: string };
+      const dateKey = session?.date || "unknown";
+      if (!answersByDate.has(dateKey)) {
+        answersByDate.set(dateKey, []);
+      }
+      answersByDate.get(dateKey)!.push(ans);
+    }
+
+    const sortedDates = Array.from(answersByDate.keys()).sort();
+    const history: ChunkHistory[] = sortedDates.map((dateKey) => {
+      const list = answersByDate.get(dateKey)!;
+      const att = list.length;
+      const mis = list.filter((a) => !a.is_known).length;
+      return {
+        testDate: dateKey,
+        mistakeRate: att > 0 ? mis / att : 0,
+      };
+    });
+
+    let needsAttention = false;
+    if (history.length === 1) {
+      needsAttention = history[0].mistakeRate > 0.3;
+    } else if (history.length >= 2) {
+      const last1 = history[history.length - 1].mistakeRate;
+      const last2 = history[history.length - 2].mistakeRate;
+      needsAttention = (last1 + last2) / 2 > 0.3;
+    }
+
+    const wordsMap = new Map<string, {
+      wordId: string;
+      word: string;
+      meaning: string;
+      pronunciation?: string;
+      mistakeCount: number;
+      totalAttempts: number;
+    }>();
+
+    for (const ans of chunkAnswers) {
+      const wordObj = ans.words as unknown as {
+        id: string;
+        word: string;
+        meaning: string;
+        pronunciation?: string;
+      } | null;
+      if (!wordObj) continue;
+
+      if (!wordsMap.has(wordObj.id)) {
+        wordsMap.set(wordObj.id, {
+          wordId: wordObj.id,
+          word: wordObj.word,
+          meaning: wordObj.meaning,
+          pronunciation: wordObj.pronunciation || undefined,
+          mistakeCount: 0,
+          totalAttempts: 0,
+        });
+      }
+      const item = wordsMap.get(wordObj.id)!;
+      item.totalAttempts += 1;
+      if (!ans.is_known) {
+        item.mistakeCount += 1;
+      }
+    }
+
+    const mistakenWords = Array.from(wordsMap.values())
+      .filter((w) => w.mistakeCount > 0)
+      .sort((a, b) => b.mistakeCount - a.mistakeCount);
+
+    result.push({
+      chunkId: chunk.id,
+      rangeStart: chunk.range_start,
+      rangeEnd: chunk.range_end,
+      originDate: chunk.date,
+      totalAttempts,
+      mistakeCount,
+      mistakeRate,
+      history,
+      needsAttention,
+      mistakenWords,
+    });
+  }
+
+  return result;
+}
+
+
+// ==========================================
+// FILE: lib/weakness/getWeakWords.ts
+// ==========================================
+import { createClient } from "@/lib/supabase/server";
+
+export interface WeakWordCard {
+  wordId: string;
+  headword: string;
+  pronunciation?: string;
+  meaning: string;
+  studyCount: number;
+  mistakeRate: number;
+  originDailyAssignmentId?: string;
+}
+
+export async function getWeakWords(
+  userId: string,
+  wordbookId: string,
+  scope?: { chunkId?: string }
+): Promise<WeakWordCard[]> {
+  const supabase = await createClient();
+
+  let targetRange: { start: number; end: number } | null = null;
+
+  if (scope?.chunkId) {
+    const { data: chunk } = await supabase
+      .from("daily_assignments")
+      .select("range_start, range_end")
+      .eq("id", scope.chunkId)
+      .single();
+
+    if (chunk) {
+      targetRange = { start: chunk.range_start, end: chunk.range_end };
+    }
+  }
+
+  let wordQuery = supabase
+    .from("words")
+    .select("id, number, word, meaning, pronunciation")
+    .eq("wordbook_id", wordbookId);
+
+  if (targetRange) {
+    wordQuery = wordQuery
+      .gte("number", targetRange.start)
+      .lte("number", targetRange.end);
+  }
+
+  const { data: words, error: wordsError } = await wordQuery;
+  if (wordsError || !words || words.length === 0) {
+    return [];
+  }
+
+  const wordIds = words.map((w) => w.id);
+
+  const { data: answers, error: ansError } = await supabase
+    .from("test_answers")
+    .select(`
+      id,
+      word_id,
+      is_known,
+      origin_daily_assignment_id,
+      created_at,
+      test_sessions!inner (
+        id,
+        user_id,
+        date,
+        created_at
+      )
+    `)
+    .eq("test_sessions.user_id", userId)
+    .in("word_id", wordIds);
+
+  if (ansError || !answers) {
+    return [];
+  }
+
+  const answersByWord = new Map<
+    string,
+    Array<{
+      isKnown: boolean;
+      date: string;
+      createdAt: string;
+      originAssignmentId?: string;
+    }>
+  >();
+
+  for (const ans of answers) {
+    const session = ans.test_sessions as unknown as {
+      date: string;
+      created_at?: string;
+    };
+    if (!answersByWord.has(ans.word_id)) {
+      answersByWord.set(ans.word_id, []);
+    }
+    answersByWord.get(ans.word_id)!.push({
+      isKnown: ans.is_known,
+      date: session.date,
+      createdAt: (ans as unknown as { created_at?: string }).created_at || session.created_at || "",
+      originAssignmentId: ans.origin_daily_assignment_id || undefined,
+    });
+  }
+
+  const { data: assignments } = await supabase
+    .from("daily_assignments")
+    .select("id, range_start, range_end")
+    .eq("user_id", userId)
+    .eq("wordbook_id", wordbookId)
+    .eq("is_review_day", false);
+
+  const weakWords: WeakWordCard[] = [];
+
+  for (const word of words) {
+    const wordAnswers = answersByWord.get(word.id) || [];
+    if (wordAnswers.length === 0) {
+      continue;
+    }
+
+    wordAnswers.sort((a, b) => {
+      if (a.createdAt && b.createdAt) {
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      }
+      return a.date.localeCompare(b.date);
+    });
+
+    const studyCount = wordAnswers.length;
+    const mistakeCount = wordAnswers.filter((a) => !a.isKnown).length;
+    const mistakeRate = studyCount > 0 ? mistakeCount / studyCount : 0;
+    const latestAnswer = wordAnswers[wordAnswers.length - 1];
+
+    const isWeak = !latestAnswer.isKnown || (mistakeRate >= 0.4 && mistakeCount > 0);
+
+    if (isWeak) {
+      let originId = latestAnswer.originAssignmentId || scope?.chunkId;
+      if (!originId && assignments) {
+        const matched = assignments.find(
+          (a) => word.number >= a.range_start && word.number <= a.range_end
+        );
+        if (matched) originId = matched.id;
+      }
+
+      weakWords.push({
+        wordId: word.id,
+        headword: word.word,
+        pronunciation: word.pronunciation || undefined,
+        meaning: word.meaning,
+        studyCount,
+        mistakeRate,
+        originDailyAssignmentId: originId,
+      });
+    }
+  }
+
+  weakWords.sort((a, b) => {
+    if (b.mistakeRate !== a.mistakeRate) {
+      return b.mistakeRate - a.mistakeRate;
+    }
+    return b.studyCount - a.studyCount;
+  });
+
+  return weakWords.slice(0, 50);
+}
+
+
+// ==========================================
+// FILE: components/auth/LoginForm.tsx
+// ==========================================
+"use client";
+
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/common/Button";
+import { Input } from "@/components/common/Input";
+import { Card } from "@/components/common/Card";
+
+export const LoginForm = () => {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        setError("メールアドレスまたはパスワードが正しくありません");
+        return;
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setError("通信エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card className="w-full">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="rounded-lg bg-akashiito-subtle p-3 text-xs text-akashiito border border-akashiito-border">
+            {error}
+          </div>
+        )}
+        <Input label="メールアドレス" type="email" required autoComplete="email" placeholder="student@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input label="パスワード" type="password" required autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Button type="submit" variant="primary" size="lg" isLoading={loading}>
+          ログインして学習を再開
+        </Button>
+      </form>
+      <div className="mt-5 text-center text-xs text-ink-muted">
+        アカウントをお持ちでないですか？{" "}
+        <Link href="/signup" className="font-semibold text-akashiito underline underline-offset-2 hover:opacity-80">
+          新規登録する
+        </Link>
+      </div>
+    </Card>
+  );
+};
+
+
+// ==========================================
+// FILE: components/auth/SignupForm.tsx
+// ==========================================
+"use client";
+
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/common/Button";
+import { Input } from "@/components/common/Input";
+import { Card } from "@/components/common/Card";
+
+export const SignupForm = () => {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (password.length < 6) {
+      setError("パスワードは6文字以上で入力してください");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const supabase = createClient();
+      const { error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { name: name.trim() },
+        },
+      });
+
+      if (signUpError) {
+        setError(signUpError.message || "サインアップに失敗しました");
+        return;
+      }
+
+      router.push("/join-group");
+      router.refresh();
+    } catch {
+      setError("通信エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card className="w-full">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="rounded-lg bg-akashiito-subtle p-3 text-xs text-akashiito border border-akashiito-border">
+            {error}
+          </div>
+        )}
+        <Input label="表示名 (ニックネーム)" type="text" required placeholder="例: たろう" value={name} onChange={(e) => setName(e.target.value)} helperText="グループメンバーに表示されます" />
+        <Input label="メールアドレス" type="email" required autoComplete="email" placeholder="student@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input label="パスワード" type="password" required autoComplete="new-password" placeholder="6文字以上" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Button type="submit" variant="primary" size="lg" isLoading={loading}>
+          アカウントを作成
+        </Button>
+      </form>
+      <div className="mt-5 text-center text-xs text-ink-muted">
+        すでにアカウントをお持ちですか？{" "}
+        <Link href="/login" className="font-semibold text-akashiito underline underline-offset-2 hover:opacity-80">
+          ログインする
+        </Link>
+      </div>
+    </Card>
+  );
+};
+
+
+// ==========================================
+// FILE: components/common/Button.tsx
+// ==========================================
+import React, { ButtonHTMLAttributes } from "react";
+
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: "primary" | "secondary" | "outline" | "danger";
+  size?: "sm" | "md" | "lg";
+  isLoading?: boolean;
+}
+
+export const Button: React.FC<ButtonProps> = ({
+  children,
+  variant = "primary",
+  size = "md",
+  isLoading = false,
+  className = "",
+  disabled,
+  ...props
+}) => {
+  const baseStyles =
+    "inline-flex items-center justify-center font-medium rounded-lg transition-colors duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none disabled:active:scale-100";
+
+  const sizeStyles = {
+    sm: "px-3 py-1.5 text-xs",
+    md: "px-4 py-2.5 text-sm",
+    lg: "px-5 py-3.5 text-base w-full",
+  };
+
+  const variantStyles = {
+    primary: "bg-ink text-paper hover:bg-ink/90 shadow-sm",
+    secondary: "bg-line/40 text-ink hover:bg-line/60",
+    outline: "border border-line bg-paper-card text-ink hover:bg-paper-hover",
+    danger: "bg-akashiito text-white hover:bg-akashiito-hover shadow-sm",
+  };
+
+  return (
+    <button
+      className={`${baseStyles} ${sizeStyles[size]} ${variantStyles[variant]} ${className}`}
+      disabled={disabled || isLoading}
+      {...props}
+    >
+      {isLoading ? (
+        <span className="flex items-center gap-2">
+          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          <span>処理中...</span>
+        </span>
+      ) : (
+        children
+      )}
+    </button>
+  );
+};
+
+
+// ==========================================
+// FILE: components/common/Card.tsx
+// ==========================================
+import React, { HTMLAttributes } from "react";
+
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  accent?: boolean;
+}
+
+export const Card: React.FC<CardProps> = ({
+  children,
+  accent = false,
+  className = "",
+  ...props
+}) => {
+  return (
+    <div
+      className={`rounded-xl border bg-paper-card p-5 shadow-paper transition-shadow ${
+        accent ? "border-akashiito/40 ring-1 ring-akashiito/20" : "border-line"
+      } ${className}`}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+};
+
+
+// ==========================================
+// FILE: components/common/Header.tsx
+// ==========================================
+"use client";
+
+import React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { BookOpen, LogOut, Settings } from "lucide-react";
+
+interface HeaderProps {
+  userName?: string;
+  showNav?: boolean;
+}
+
+export const Header: React.FC<HeaderProps> = ({ userName, showNav = true }) => {
+  const router = useRouter();
+  const supabase = createClient();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  };
+
+  return (
+    <header className="mb-6 flex items-center justify-between border-b border-line pb-4 pt-1">
+      <Link href="/dashboard" className="flex items-center gap-2 group">
+        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-akashiito text-white shadow-sm transition-transform group-hover:scale-105">
+          <BookOpen className="h-4 w-4" />
+        </div>
+        <div>
+          <span className="font-mincho text-lg font-bold tracking-tight text-ink">単語道場</span>
+          <span className="ml-2 inline-block rounded-full bg-highlighter/30 px-2 py-0.5 font-number text-[10px] font-bold text-ink">
+            Phase 1
+          </span>
+        </div>
+      </Link>
+
+      {showNav && (
+        <div className="flex items-center gap-3">
+          {userName && <span className="text-xs text-ink-muted font-medium">{userName}</span>}
+          <Link href="/settings/wordbook" aria-label="単語帳設定" className="rounded-lg p-2 text-ink-muted hover:bg-paper-hover hover:text-ink transition-colors">
+            <Settings className="h-4 w-4" />
+          </Link>
+          <button onClick={handleLogout} aria-label="ログアウト" className="rounded-lg p-2 text-ink-muted hover:bg-paper-hover hover:text-akashiito transition-colors">
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+    </header>
+  );
+};
+
+
+// ==========================================
+// FILE: components/common/Input.tsx
+// ==========================================
+import React, { InputHTMLAttributes, forwardRef } from "react";
+
+interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+  label?: string;
+  error?: string;
+  helperText?: string;
+}
+
+export const Input = forwardRef<HTMLInputElement, InputProps>(
+  ({ label, error, helperText, className = "", id, ...props }, ref) => {
+    const inputId = id || props.name;
+
+    return (
+      <div className="w-full space-y-1.5 text-left">
+        {label && (
+          <label htmlFor={inputId} className="block text-xs font-semibold tracking-wider text-ink-muted uppercase">
+            {label}
+          </label>
+        )}
+        <input
+          id={inputId}
+          ref={ref}
+          className={`w-full rounded-lg border bg-paper-card px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-subtle/60 transition-all focus:border-ink ${
+            error ? "border-akashiito focus:ring-akashiito" : "border-line focus:ring-ink"
+          } ${className}`}
+          {...props}
+        />
+        {error && <p className="text-xs text-akashiito">{error}</p>}
+        {helperText && !error && <p className="text-xs text-ink-muted">{helperText}</p>}
+      </div>
+    );
+  }
+);
+Input.displayName = "Input";
+
+
+// ==========================================
+// FILE: components/daily-check/DailyCheckCard.tsx
+// ==========================================
+"use client";
+
+import React, { useState, useEffect } from 'react';
+
+interface DailyCheckCardProps {
+  word: string;
+  meaning: string;
+  pronunciation?: string | null;
+  currentIndex: number;
+  totalCount: number;
+  onJudged: (isKnown: boolean) => void;
+}
+
+export function DailyCheckCard({
+  word,
+  meaning,
+  pronunciation,
+  currentIndex,
+  totalCount,
+  onJudged,
+}: DailyCheckCardProps) {
+  const [isRevealed, setIsRevealed] = useState(false);
+
+  useEffect(() => {
+    setIsRevealed(false);
+  }, [word]);
+
+  return (
+    <div className="w-full max-w-md mx-auto bg-white rounded-3xl border border-line p-6 shadow-xs flex flex-col justify-between min-h-[380px]">
+      <div className="flex justify-between items-center text-xs font-mono text-stone-400">
+        <span>Daily Check</span>
+        <span>
+          {currentIndex + 1} / {totalCount}
+        </span>
+      </div>
+
+      <div className="text-center my-6">
+        <h2 className="font-serif text-3xl sm:text-4xl text-ink font-bold tracking-tight">
+          {word}
+        </h2>
+        {pronunciation && (
+          <p className="text-sm font-sans text-stone-400 mt-1">{pronunciation}</p>
+        )}
+
+        <div className="mt-8 min-h-[72px] flex items-center justify-center">
+          {!isRevealed ? (
+            <button
+              type="button"
+              onClick={() => setIsRevealed(true)}
+              className="text-xs text-stone-400 hover:text-stone-600 min-h-[44px] px-4 py-2 rounded-lg border border-dashed border-stone-200"
+            >
+              タップして意味を表示
+            </button>
+          ) : (
+            <p className="font-serif text-xl text-ink font-semibold">{meaning}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 pt-4">
+        <button
+          type="button"
+          onClick={() => onJudged(false)}
+          className="min-h-[56px] rounded-xl border border-stone-200 bg-stone-50 text-stone-700 font-medium text-sm hover:bg-stone-100 active:scale-[0.98] transition-all"
+        >
+          わからなかった
+        </button>
+        <button
+          type="button"
+          onClick={() => onJudged(true)}
+          className="min-h-[56px] rounded-xl bg-ink text-paper font-medium text-sm hover:opacity-90 active:scale-[0.98] transition-all"
+        >
+          わかった
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/dashboard/SetRangeCTA.tsx
+// ==========================================
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { WeeklyRangeModal } from "@/components/weekly-range/WeeklyRangeModal";
+
+interface SetRangeCTAProps {
+  userId: string;
+  wordbookId?: string;
+  weekStartStr: string;
+}
+
+export function SetRangeCTA({
+  userId,
+  wordbookId,
+  weekStartStr,
+}: SetRangeCTAProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const router = useRouter();
+
+  return (
+    <>
+      <div className="p-6 border border-line rounded-2xl bg-paper shadow-sm space-y-4">
+        <div className="space-y-1">
+          <span className="text-xs text-ink/60 font-mono">今週の学習プラン</span>
+          <h2 className="font-mincho text-lg font-bold text-ink">
+            今週の単語学習範囲を設定しましょう
+          </h2>
+          <p className="text-xs text-ink/60 leading-relaxed">
+            土曜日から始まる1週間の目標範囲を決めることで、毎日の確認テストが自動でスケジュールされます。
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+          className="w-full py-3.5 bg-ink text-paper rounded-xl font-medium text-sm hover:opacity-90 active:scale-[0.99] transition-all shadow-sm"
+        >
+          今週の範囲を設定する
+        </button>
+      </div>
+
+      {wordbookId && (
+        <WeeklyRangeModal
+          isOpen={isOpen}
+          onClose={() => setIsOpen(false)}
+          userId={userId}
+          wordbookId={wordbookId}
+          weekStartStr={weekStartStr}
+          onSaved={() => {
+            router.refresh();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+
+// ==========================================
+// FILE: components/dashboard/StreakBadge.tsx
+// ==========================================
+interface StreakBadgeProps {
+  currentStreak: number;
+}
+
+export function StreakBadge({ currentStreak }: StreakBadgeProps) {
+  if (currentStreak === 0) return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-line bg-paper px-3 py-1 text-xs text-ink/60">
+      🔥 {currentStreak}日連続
+    </span>
+  );
+}
+
+
+// ==========================================
+// FILE: components/dashboard/TestCTA.tsx
+// ==========================================
+import Link from 'next/link';
+
+interface TestCTAProps {
+  wordCount: number;
+  isReviewDay: boolean;
+}
+
+export function TestCTA({ wordCount, isReviewDay }: TestCTAProps) {
+  return (
+    <Link
+      href="/test"
+      className="block min-h-[56px] w-full rounded-2xl bg-akashiito px-4 py-3 text-center font-mincho text-paper shadow-sm transition hover:opacity-95"
+    >
+      {isReviewDay ? `復習テスト(${wordCount}語)` : `今日の確認テスト(${wordCount}語)`}
+    </Link>
+  );
+}
+
+
+// ==========================================
+// FILE: components/dashboard/TodayRangeCard.tsx
+// ==========================================
+export function TodayRangeCard({
+  rangeStart,
+  rangeEnd,
+  isReviewDay,
+  wordbookName,
+}: {
+  rangeStart: number | null;
+  rangeEnd: number | null;
+  isReviewDay: boolean;
+  wordbookName: string;
+}) {
+  if (rangeStart === null || rangeEnd === null) {
+    return (
+      <div className="rounded-3xl border border-dashed border-line bg-white/50 p-6 text-center">
+        <p className="text-sm text-ink/60">今日の学習範囲はまだ設定されていません</p>
+      </div>
+    );
+  }
+
+  const wordCount = rangeEnd - rangeStart + 1;
+
+  return (
+    <div className="relative overflow-hidden rounded-3xl border border-line bg-white p-6 shadow-xs">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-ink/50 tracking-wider">{wordbookName || '単語帳'}</span>
+        {isReviewDay ? (
+          <span className="rounded-full bg-highlighter px-2.5 py-0.5 text-xs font-bold text-ink">総復習テスト日</span>
+        ) : (
+          <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs font-medium text-ink/70">今日のノルマ: {wordCount}語</span>
+        )}
+      </div>
+      <div className="mt-3">
+        <p className="font-mincho text-3xl font-bold text-ink tracking-tight">No.{rangeStart} <span className="text-xl text-ink/40 font-normal">〜</span> No.{rangeEnd}</p>
+      </div>
+      <p className="mt-2 text-xs text-ink/60">{isReviewDay ? '土曜日から積み上げた範囲を完璧にする復習デーです' : 'まずは1周、テンポよく意味を確認していきましょう'}</p>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/dashboard/WeeklySchedule.tsx
+// ==========================================
+"use client";
+
+import React from "react";
+import { DAY_LABELS_SAT, getWeekDates, getWeekStartSaturday } from "@/lib/assignment/weekDates";
+
+export interface ScheduleItem {
+  id?: string;
+  date: string;
+  range_start?: number | null;
+  rangeStart?: number | null;
+  range_end?: number | null;
+  rangeEnd?: number | null;
+  is_review_day?: boolean;
+  isReviewDay?: boolean;
+}
+
+export interface DaySchedule {
+  date: string;
+  dayLabel?: string;
+  rangeStart?: number | null;
+  rangeEnd?: number | null;
+  isReviewDay?: boolean;
+  isToday?: boolean;
+}
+
+interface WeeklyScheduleProps {
+  days?: DaySchedule[];
+  assignments?: ScheduleItem[];
+  todayDate: string;
+}
+
+export function WeeklySchedule({
+  days: propDays,
+  assignments = [],
+  todayDate,
+}: WeeklyScheduleProps) {
+  let days: DaySchedule[] = [];
+
+  if (propDays && Array.isArray(propDays)) {
+    days = propDays;
+  } else {
+    const safeSat = getWeekStartSaturday(todayDate);
+    const weekDates = getWeekDates(safeSat);
+
+    const assignmentMap = new Map<string, ScheduleItem>();
+    for (const a of (assignments || [])) {
+      if (a?.date) assignmentMap.set(a.date, a);
+    }
+
+    days = weekDates.map((dateStr, idx) => {
+      const match = assignmentMap.get(dateStr);
+      return {
+        date: dateStr,
+        dayLabel: DAY_LABELS_SAT[idx] || "",
+        rangeStart: match?.range_start ?? match?.rangeStart ?? null,
+        rangeEnd: match?.range_end ?? match?.rangeEnd ?? null,
+        isReviewDay: match?.is_review_day ?? match?.isReviewDay ?? false,
+        isToday: dateStr === todayDate,
+      };
+    });
+  }
+
+  return (
+    <div className="grid grid-cols-7 gap-1.5 p-3 rounded-2xl bg-paper border border-line shadow-sm">
+      {(days || []).map((day, i) => {
+        const isToday = day.isToday ?? (day.date === todayDate);
+        const hasRange =
+          day.rangeStart !== null &&
+          day.rangeStart !== undefined &&
+          day.rangeEnd !== null &&
+          day.rangeEnd !== undefined;
+        const isReview = !!day.isReviewDay;
+        const dayLabel = day.dayLabel || DAY_LABELS_SAT[i] || "";
+        const dateNum = day.date ? parseInt(day.date.split("-")[2] || "1", 10) : i + 1;
+
+        return (
+          <div
+            key={day.date || i}
+            className={`
+              flex flex-col items-center justify-between p-2 rounded-xl text-center min-h-[72px] transition
+              ${
+                isToday
+                  ? "bg-ink text-paper font-bold shadow-sm"
+                  : "bg-paper/50 border border-line/60 text-ink"
+              }
+            `}
+          >
+            <span
+              className={`text-[10px] font-maru ${
+                isToday ? "text-paper/80" : "text-ink/50"
+              }`}
+            >
+              {dayLabel}
+            </span>
+
+            <span
+              className={`text-sm font-mincho my-0.5 ${
+                isToday ? "text-paper font-bold" : "text-ink"
+              }`}
+            >
+              {dateNum}
+            </span>
+
+            <div className="text-[9px] font-maru leading-tight">
+              {hasRange ? (
+                isReview ? (
+                  <span
+                    className={`inline-block px-1 py-0.5 rounded text-[8px] ${
+                      isToday
+                        ? "bg-paper/20 text-paper font-bold"
+                        : "bg-highlighter/30 text-ink font-bold"
+                    }`}
+                  >
+                    復習
+                  </span>
+                ) : (
+                  <span
+                    className={`truncate max-w-[36px] inline-block ${
+                      isToday ? "text-paper/90" : "text-ink/70"
+                    }`}
+                  >
+                    {day.rangeStart}-{day.rangeEnd}
+                  </span>
+                )
+              ) : (
+                <span
+                  className={`${
+                    isToday ? "text-paper/40" : "text-ink/30"
+                  }`}
+                >
+                  -
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/group/CreateGroupForm.tsx
+// ==========================================
+"use client";
+
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/common/Button";
+import { Input } from "@/components/common/Input";
+import { Card } from "@/components/common/Card";
+
+export const CreateGroupForm = () => {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create", name }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "グループ作成に失敗しました");
+        return;
+      }
+
+      router.push("/select-wordbook");
+      router.refresh();
+    } catch {
+      setError("通信エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card>
+      <h2 className="font-mincho text-base font-bold text-ink mb-3">新しいグループを作る</h2>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && <p className="text-xs text-akashiito">{error}</p>}
+        <Input placeholder="例: 東大志望4人組" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Button type="submit" variant="primary" size="lg" isLoading={loading}>
+          グループを作成して招待コードを発行
+        </Button>
+      </form>
+    </Card>
+  );
+};
+
+
+// ==========================================
+// FILE: components/group/GroupMembersList.tsx
+// ==========================================
+"use client";
+
+import React from "react";
+import { Card } from "@/components/common/Card";
+import { Users, User, Copy } from "lucide-react";
+import type { GroupMember } from "@/types";
+
+interface GroupMembersListProps {
+  groupName: string;
+  inviteCode: string;
+  members: GroupMember[];
+  currentUserId: string;
+}
+
+export const GroupMembersList: React.FC<GroupMembersListProps> = ({
+  groupName,
+  inviteCode,
+  members,
+  currentUserId,
+}) => {
+  return (
+    <Card className="space-y-4">
+      <div className="flex items-center justify-between border-b border-line pb-3">
+        <div>
+          <span className="text-[11px] font-semibold tracking-wider text-ink-muted uppercase">
+            参加中グループ
+          </span>
+          <h2 className="font-mincho text-lg font-bold text-ink">
+            {groupName}
+          </h2>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-full bg-paper px-3 py-1 border border-line">
+          <Users className="h-3.5 w-3.5 text-ink-muted" />
+          <span className="font-number text-xs font-bold text-ink">
+            {members.length} / 4人
+          </span>
+        </div>
+      </div>
+
+      {/* 招待コード表示エリア */}
+      <div className="flex items-center justify-between rounded-lg bg-highlighter/15 p-3 border border-highlighter/40">
+        <div>
+          <span className="block text-[10px] font-bold text-ink-muted uppercase">
+            招待コード (仲間を招待)
+          </span>
+          <span className="font-number text-lg font-bold tracking-widest text-ink">
+            {inviteCode}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(inviteCode);
+            alert("招待コードをコピーしました！");
+          }}
+          className="inline-flex items-center gap-1 rounded-md bg-paper-card px-2.5 py-1.5 text-xs font-semibold text-ink border border-line shadow-sm hover:bg-paper-hover active:scale-95 transition-all cursor-pointer"
+        >
+          <Copy className="h-3.5 w-3.5 text-ink-muted" />
+          コピー
+        </button>
+      </div>
+
+      {/* メンバー一覧 */}
+      <div>
+        <span className="text-xs font-semibold text-ink-muted mb-2 block">
+          メンバー一覧
+        </span>
+        <ul className="space-y-2">
+          {members.map((member) => {
+            const isMe = member.id === currentUserId;
+            return (
+              <li
+                key={member.id}
+                className={`flex items-center justify-between rounded-lg p-2.5 border transition-all ${
+                  isMe
+                    ? "bg-akashiito-subtle/50 border-akashiito-border"
+                    : "bg-paper/50 border-line/60"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
+                      isMe
+                        ? "bg-akashiito text-white"
+                        : "bg-line text-ink-muted"
+                    }`}
+                  >
+                    <User className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium text-ink">
+                      {member.name}
+                    </span>
+                    {isMe && (
+                      <span className="ml-1.5 text-[10px] font-bold text-akashiito">
+                        (あなた)
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="inline-block rounded px-2 py-0.5 text-[11px] bg-paper-card border border-line text-ink-muted font-medium">
+                    {member.wordbooks?.name || "単語帳未設定"}
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </Card>
+  );
+};
+
+// ==========================================
+// FILE: components/group/JoinGroupForm.tsx
+// ==========================================
+"use client";
+
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/common/Button";
+import { Input } from "@/components/common/Input";
+import { Card } from "@/components/common/Card";
+
+export const JoinGroupForm = () => {
+  const router = useRouter();
+  const [inviteCode, setInviteCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "join", inviteCode }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "グループへの参加に失敗しました");
+        return;
+      }
+
+      router.push("/select-wordbook");
+      router.refresh();
+    } catch {
+      setError("通信エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card>
+      <h2 className="font-mincho text-base font-bold text-ink mb-3">招待コードで参加する</h2>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && <p className="text-xs text-akashiito">{error}</p>}
+        <Input
+          placeholder="6桁のコード (例: 7K9X2P)"
+          value={inviteCode}
+          onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+          maxLength={6}
+          className="font-number tracking-widest uppercase text-center font-bold text-base"
+          required
+        />
+        <Button type="submit" variant="secondary" size="lg" isLoading={loading}>
+          グループに参加
+        </Button>
+      </form>
+    </Card>
+  );
+};
+
+
+// ==========================================
+// FILE: components/home/HomeStateCTA.tsx
+// ==========================================
+import React from 'react';
+import Link from 'next/link';
+import { HomeStateMachine } from '@/lib/srs/types';
+
+interface HomeStateCTAProps {
+  state: HomeStateMachine;
+  onSetRangeClick?: () => void;
+}
+
+export function HomeStateCTA({ state, onSetRangeClick }: HomeStateCTAProps) {
+  if (state.state === 'no_range') {
+    return (
+      <div className="p-6 rounded-2xl bg-white border border-line shadow-xs">
+        <h3 className="font-serif text-lg text-ink font-semibold mb-2">今週の学習範囲が未設定です</h3>
+        <p className="text-sm text-stone-500 mb-5 leading-relaxed">
+          土曜日を起点とする週間サイクルで、今週進める単語帳の範囲を設定しましょう。
+        </p>
+        <Link
+          href="/assignments/setup"
+          onClick={onSetRangeClick}
+          className="w-full min-h-[56px] flex items-center justify-center rounded-xl bg-ink text-paper font-medium text-base hover:opacity-90 active:scale-[0.99] transition-all"
+        >
+          今週の範囲を設定する
+        </Link>
+      </div>
+    );
+  }
+
+  if (state.state === 'review_due') {
+    return (
+      <div className="p-6 rounded-2xl bg-white border border-line shadow-xs">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs font-sans tracking-wide text-stone-500 uppercase">Today&apos;s Review</span>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900 border border-amber-200">
+            {state.sessionCount} 件
+          </span>
+        </div>
+        <h3 className="font-serif text-xl text-ink font-bold mb-1">
+          今日の復習をはじめましょう
+        </h3>
+        <p className="text-xs text-stone-500 mb-5">
+          新出語と復習語が自動で配分されます（約5分）
+        </p>
+        <Link
+          href="/review"
+          className="w-full min-h-[56px] flex items-center justify-center rounded-xl bg-amber-300 text-ink font-semibold text-lg hover:bg-amber-400 active:scale-[0.99] transition-all shadow-xs"
+        >
+          今日の復習 {state.sessionCount}件
+        </Link>
+      </div>
+    );
+  }
+
+  if (state.state === 'daily_check_due') {
+    return (
+      <div className="p-6 rounded-2xl bg-white border border-amber-200 shadow-xs">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs font-sans tracking-wide text-amber-700 uppercase">Retention Check</span>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+            {state.count} 語
+          </span>
+        </div>
+        <h3 className="font-serif text-xl text-ink font-bold mb-1">
+          デイリーチェック
+        </h3>
+        <p className="text-xs text-stone-500 mb-5">
+          今日新しく導入した単語の定着確認（約2分）
+        </p>
+        <Link
+          href="/daily-check"
+          className="w-full min-h-[56px] flex items-center justify-center rounded-xl bg-ink text-paper font-semibold text-base hover:opacity-90 active:scale-[0.99] transition-all"
+        >
+          デイリーチェック({state.count}語・約2分)
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 rounded-2xl bg-white border border-line shadow-xs text-center">
+      <div className="w-12 h-12 rounded-full bg-stone-100 border border-line flex items-center justify-center mx-auto mb-3">
+        <svg className="w-6 h-6 text-stone-800" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
+      <h3 className="font-serif text-lg text-ink font-bold mb-1">今日の分は完了しました！</h3>
+      <p className="text-xs text-stone-500 mb-5">
+        本日の学習と確認はすべて終了しています。
+      </p>
+
+      {state.hasAheadContent && (
+        <div className="pt-3 border-t border-line/60">
+          <Link
+            href="/review?mode=ahead"
+            className="text-xs text-stone-500 hover:text-ink underline underline-offset-4 font-sans inline-block py-2 min-h-[44px]"
+          >
+            先取りして学習する（任意）
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/home/StreakBadge.tsx
+// ==========================================
+import React from 'react';
+
+interface StreakBadgeProps {
+  streak: number;
+}
+
+export function StreakBadge({ streak }: StreakBadgeProps) {
+  if (streak <= 0) return null;
+
+  return (
+    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-stone-100 border border-line text-xs font-sans text-stone-600">
+      <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+      <span>
+        <strong className="font-semibold text-ink">{streak}</strong> 日連続
+      </span>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/layout/BottomNav.tsx
+// ==========================================
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+export function BottomNav() {
+  const pathname = usePathname();
+
+  if (pathname?.startsWith("/test")) {
+    return null;
+  }
+
+  const navItems = [
+    { label: "ホーム", href: "/dashboard", icon: "🏠" },
+    { label: "グループ", href: "/group", icon: "👥" },
+  ];
+
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-paper/95 border-t border-line backdrop-blur-sm">
+      <div className="max-w-lg mx-auto flex items-center justify-around h-16 px-4">
+        {navItems.map((item) => {
+          const isActive = pathname === item.href;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
+                isActive ? "text-ink font-bold" : "text-ink/40 hover:text-ink/70"
+              }`}
+            >
+              <span className="text-base mb-0.5">{item.icon}</span>
+              <span className="text-[11px] tracking-tight">{item.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+
+// ==========================================
+// FILE: components/review/WordJudgeCard.tsx
+// ==========================================
+"use client";
+
+import React, { useState, useEffect } from "react";
+
+export interface WordCardData {
+  wordId: string;
+  headword: string;
+  pronunciation?: string;
+  meaning: string;
+  studyCount?: number;
+  originDailyAssignmentId?: string;
+  number?: number;
+}
+
+interface WordJudgeCardProps {
+  card: WordCardData;
+  onJudge: (isKnown: boolean) => void;
+  currentIndex: number;
+  totalCards: number;
+}
+
+export function WordJudgeCard({
+  card,
+  onJudge,
+  currentIndex,
+  totalCards,
+}: WordJudgeCardProps) {
+  const [isRevealed, setIsRevealed] = useState(false);
+
+  useEffect(() => {
+    setIsRevealed(false);
+  }, [card.wordId]);
+
+  return (
+    <div className="w-full max-w-sm mx-auto flex flex-col justify-between h-[480px] p-6 rounded-2xl bg-paper border border-line shadow-sm">
+      <div className="flex items-center justify-between text-xs text-ink/50 font-maru">
+        <span>
+          {currentIndex + 1} / {totalCards}
+        </span>
+        {typeof card.studyCount === "number" && (
+          <span>学習 {card.studyCount}回目</span>
+        )}
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center text-center my-4 space-y-4">
+        <div>
+          <h2 className="text-3xl font-bold text-ink font-mincho tracking-wide">
+            {card.headword}
+          </h2>
+          {card.pronunciation && (
+            <p className="text-xs text-ink/40 font-maru mt-1">
+              {card.pronunciation}
+            </p>
+          )}
+        </div>
+
+        <div
+          onClick={() => setIsRevealed(!isRevealed)}
+          className="w-full min-h-[100px] p-4 rounded-xl border border-dashed border-line/80 flex items-center justify-center cursor-pointer transition select-none hover:bg-ink/5"
+        >
+          {isRevealed ? (
+            <p className="text-lg font-medium text-ink font-mincho animate-in fade-in duration-150">
+              {card.meaning}
+            </p>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-ink/40 font-maru">
+              <span className="w-2 h-2 rounded-full bg-akashiito/60 inline-block" />
+              <span>タップして意味を表示</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 pt-2">
+        <button
+          type="button"
+          onClick={() => onJudge(false)}
+          className="w-full py-3.5 rounded-xl border border-line bg-paper text-ink/70 font-bold text-sm transition hover:bg-ink/5 active:scale-[0.98] font-maru"
+        >
+          わからない
+        </button>
+        <button
+          type="button"
+          onClick={() => onJudge(true)}
+          className="w-full py-3.5 rounded-xl bg-ink text-paper font-bold text-sm transition hover:opacity-90 active:scale-[0.98] font-maru"
+        >
+          わかる
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/review/WordJudgeCardScreen.tsx
+// ==========================================
+'use client';
+
+import { useState } from 'react';
+import { WordJudgeCard, type WordCardData } from './WordJudgeCard';
+
+interface WordJudgeCardScreenProps {
+  cards: WordCardData[];
+  onJudge: (wordId: string, isKnown: boolean) => void;
+  onAllDone?: () => void;
+}
+
+const MAX_STACK_VISIBLE = 3;
+
+export function WordJudgeCardScreen({ cards, onJudge, onAllDone }: WordJudgeCardScreenProps) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const total = cards.length;
+  const remaining = cards.slice(currentIndex, currentIndex + MAX_STACK_VISIBLE);
+
+  const handleJudge = (wordId: string, isKnown: boolean) => {
+    onJudge(wordId, isKnown);
+    const next = currentIndex + 1;
+    if (next >= total) {
+      onAllDone?.();
+    }
+    setCurrentIndex(next);
+  };
+
+  if (currentIndex >= total) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <p className="font-mincho text-2xl font-bold text-ink">おつかれさま!</p>
+        <p className="font-maru text-sm text-ink/60">{total}語の判定が終わりました</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* 上部プログレスバー */}
+      <div className="px-4 pb-2 pt-4">
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-line/50">
+          <div
+            className="h-full rounded-full bg-ink transition-[width] duration-300 motion-reduce:transition-none"
+            style={{ width: `${(currentIndex / total) * 100}%` }}
+          />
+        </div>
+        <p className="mt-1 font-maru text-right text-xs text-ink/40">
+          {currentIndex}/{total}
+        </p>
+      </div>
+
+      {/* カードスタック領域 */}
+      <div className="relative flex-1 px-4 pb-6 pt-2">
+        {remaining.map((card, i) => (
+          <WordJudgeCard
+            key={card.wordId}
+            card={card}
+            isTop={i === 0}
+            stackOffset={i}
+            onJudge={(isKnown) => handleJudge(card.wordId, isKnown)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/test/TestSessionRunner.tsx
+// ==========================================
+"use client";
+
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { WordJudgeCardScreen } from "@/components/review/WordJudgeCardScreen";
+import type { WordCardData } from "@/components/review/WordJudgeCard";
+import { ChunkSummaryScreen, type ChunkSummaryItem } from "@/components/weakness/ChunkSummaryScreen";
+
+export interface ChunkMeta {
+  chunkId: string;
+  rangeStart: number;
+  rangeEnd: number;
+  originDate: string;
+  previousMistakeRate: number | null;
+}
+
+interface TestSessionRunnerProps {
+  cards: WordCardData[];
+  dailyAssignmentId?: string;
+  sessionType: "daily_check" | "normal";
+  isReviewDay?: boolean;
+  chunkMetaList?: ChunkMeta[];
+}
+
+export function TestSessionRunner({
+  cards,
+  dailyAssignmentId,
+  sessionType,
+  isReviewDay = false,
+  chunkMetaList = [],
+}: TestSessionRunnerProps) {
+  const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [summaryItems, setSummaryItems] = useState<ChunkSummaryItem[] | null>(null);
+
+  const handleAllDone = async (results: Array<{ wordId: string; isKnown: boolean }>) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("/api/test-sessions/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dailyAssignmentId: dailyAssignmentId || null,
+          type: sessionType,
+          results,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        console.error("Failed to save test results:", errData);
+      }
+
+      if (isReviewDay && chunkMetaList.length > 0) {
+        const resultMap = new Map<string, boolean>();
+        for (const r of results) {
+          resultMap.set(r.wordId, r.isKnown);
+        }
+
+        const items: ChunkSummaryItem[] = chunkMetaList.map((meta) => {
+          const chunkCards = cards.filter((c) => {
+            if (c.originDailyAssignmentId) {
+              return c.originDailyAssignmentId === meta.chunkId;
+            }
+            if (typeof c.number === "number") {
+              return c.number >= meta.rangeStart && c.number <= meta.rangeEnd;
+            }
+            return false;
+          });
+
+          const totalAnswered = chunkCards.length;
+          const mistakeCount = chunkCards.filter(
+            (c) => resultMap.get(c.wordId) === false
+          ).length;
+          const currentMistakeRate =
+            totalAnswered > 0 ? mistakeCount / totalAnswered : 0;
+
+          return {
+            chunkId: meta.chunkId,
+            rangeStart: meta.rangeStart,
+            rangeEnd: meta.rangeEnd,
+            originDate: meta.originDate,
+            totalAnswered,
+            mistakeCount,
+            currentMistakeRate,
+            previousMistakeRate: meta.previousMistakeRate,
+          };
+        }).filter((item) => item.totalAnswered > 0);
+
+        if (items.length > 0) {
+          setSummaryItems(items);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch (err) {
+      console.error("Error submitting test session:", err);
+      router.push("/dashboard");
+      router.refresh();
+    }
+  };
+
+  if (summaryItems) {
+    return (
+      <ChunkSummaryScreen
+        items={summaryItems}
+        onFinish={() => {
+          router.push("/dashboard");
+          router.refresh();
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="relative min-h-screen bg-paper">
+      {isSubmitting && (
+        <div className="fixed inset-0 z-50 bg-paper/80 backdrop-blur-sm flex flex-col items-center justify-center">
+          <div className="w-8 h-8 border-2 border-ink border-t-transparent rounded-full animate-spin mb-3" />
+          <p className="text-xs font-bold text-ink/70 font-maru">
+            結果を保存中...
+          </p>
+        </div>
+      )}
+      <WordJudgeCardScreen cards={cards} onAllDone={handleAllDone} />
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/weakness/ChunkSummaryScreen.tsx
+// ==========================================
+"use client";
+
+import React from "react";
+import Link from "next/link";
+
+export interface ChunkSummaryItem {
+  chunkId: string;
+  rangeStart: number;
+  rangeEnd: number;
+  originDate: string;
+  totalAnswered: number;
+  mistakeCount: number;
+  currentMistakeRate: number;
+  previousMistakeRate: number | null;
+}
+
+interface ChunkSummaryScreenProps {
+  items: ChunkSummaryItem[];
+  onFinish?: () => void;
+}
+
+export function ChunkSummaryScreen({
+  items,
+  onFinish,
+}: ChunkSummaryScreenProps) {
+  const totalAnswered = items.reduce((sum, item) => sum + item.totalAnswered, 0);
+  const totalMistakes = items.reduce((sum, item) => sum + item.mistakeCount, 0);
+  const overallAccuracy =
+    totalAnswered > 0
+      ? Math.round(((totalAnswered - totalMistakes) / totalAnswered) * 100)
+      : 100;
+
+  return (
+    <main className="max-w-md mx-auto min-h-screen px-4 py-8 flex flex-col justify-between bg-paper">
+      <div className="space-y-6">
+        <div className="text-center space-y-2 pt-4">
+          <div className="inline-block px-3 py-1 rounded-full bg-ink/5 border border-line text-xs font-bold text-ink/70 font-maru">
+            復習テスト完了
+          </div>
+          <h1 className="text-2xl font-bold text-ink font-mincho">
+            復習サマリー
+          </h1>
+          <p className="text-xs text-ink/60 font-maru">
+            各学習チャンクの定着状況と前回の比較です。
+          </p>
+        </div>
+
+        <div className="p-5 rounded-2xl border border-line bg-paper text-center shadow-sm">
+          <div className="text-xs text-ink/50 font-maru">全体の正答率</div>
+          <div className="text-4xl font-bold text-ink font-mincho my-1">
+            {overallAccuracy}%
+          </div>
+          <div className="text-xs text-ink/60 font-maru">
+            {totalAnswered} 語中 {totalAnswered - totalMistakes} 語 正解
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <h2 className="text-xs font-bold text-ink/70 font-maru px-1">
+            チャンク別の変化
+          </h2>
+
+          <div className="space-y-2">
+            {items.map((item) => {
+              const currentAccuracy = Math.round(
+                (1 - item.currentMistakeRate) * 100
+              );
+
+              let statusLabel = "初回";
+              let statusClass = "text-ink/60 bg-ink/5 border-line";
+
+              if (item.previousMistakeRate !== null) {
+                const diff = item.previousMistakeRate - item.currentMistakeRate;
+                if (diff > 0.05) {
+                  statusLabel = "改善 ✨";
+                  statusClass = "text-ink bg-highlighter/30 border-highlighter/60 font-bold";
+                } else if (diff < -0.05) {
+                  statusLabel = "要注意";
+                  statusClass = "text-akashiito bg-akashiito/10 border-akashiito/30 font-bold";
+                } else {
+                  statusLabel = "維持";
+                  statusClass = "text-ink/70 bg-ink/5 border-line";
+                }
+              }
+
+              return (
+                <div
+                  key={item.chunkId}
+                  className="p-3.5 rounded-xl border border-line bg-paper flex items-center justify-between shadow-sm"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-ink font-mincho">
+                        No. {item.rangeStart} - {item.rangeEnd}
+                      </span>
+                      <span className="text-[10px] text-ink/40 font-maru">
+                        ({item.originDate})
+                      </span>
+                    </div>
+                    <div className="text-xs text-ink/60 font-maru mt-0.5">
+                      正答率: {currentAccuracy}% ({item.totalAnswered - item.mistakeCount}/{item.totalAnswered})
+                    </div>
+                  </div>
+
+                  <div className="shrink-0">
+                    <span
+                      className={`text-xs px-2.5 py-1 rounded-full border ${statusClass} font-maru inline-block`}
+                    >
+                      {statusLabel}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="pt-6 pb-4">
+        {onFinish ? (
+          <button
+            type="button"
+            onClick={onFinish}
+            className="w-full py-4 rounded-xl bg-ink text-paper font-bold text-sm text-center block transition hover:opacity-90 active:scale-[0.99] font-maru shadow-sm"
+          >
+            ダッシュボードへ戻る
+          </button>
+        ) : (
+          <Link
+            href="/dashboard"
+            className="w-full py-4 rounded-xl bg-ink text-paper font-bold text-sm text-center block transition hover:opacity-90 active:scale-[0.99] font-maru shadow-sm"
+          >
+            ダッシュボードへ戻る
+          </Link>
+        )}
+      </div>
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: components/weakness/WeaknessBottomSheet.tsx
+// ==========================================
+"use client";
+
+import React, { useEffect } from "react";
+import Link from "next/link";
+import type { ChunkStat } from "@/lib/weakness/computeChunkStats";
+
+interface WeaknessBottomSheetProps {
+  chunk: ChunkStat | null;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function WeaknessBottomSheet({
+  chunk,
+  isOpen,
+  onClose,
+}: WeaknessBottomSheetProps) {
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen || !chunk) return null;
+
+  const totalWords = chunk.rangeEnd - chunk.rangeStart + 1;
+  const mistakePercent = Math.round(chunk.mistakeRate * 100);
+
+  const renderHistoryGraph = () => {
+    if (!chunk.history || chunk.history.length === 0) {
+      return (
+        <div className="text-center py-4 text-xs text-ink/40 font-maru bg-paper/50 rounded-lg border border-line">
+          まだテストの履歴がありません
+        </div>
+      );
+    }
+
+    if (chunk.history.length === 1) {
+      const rate = chunk.history[0].mistakeRate;
+      return (
+        <div className="flex items-center justify-between p-3 bg-paper rounded-lg border border-line">
+          <div className="text-xs text-ink/70">テスト実施日: {chunk.history[0].testDate}</div>
+          <div className="text-xs font-bold text-ink">ミス率 {Math.round(rate * 100)}%</div>
+        </div>
+      );
+    }
+
+    const svgWidth = 280;
+    const svgHeight = 60;
+    const paddingX = 24;
+    const paddingY = 12;
+
+    const points = chunk.history.map((h, i) => {
+      const x =
+        paddingX +
+        (i / (chunk.history.length - 1)) * (svgWidth - paddingX * 2);
+      const y =
+        svgHeight -
+        paddingY -
+        h.mistakeRate * (svgHeight - paddingY * 2);
+      return { x, y, rate: h.mistakeRate, date: h.testDate };
+    });
+
+    const pathD = points
+      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+      .join(" ");
+
+    return (
+      <div className="w-full bg-paper/60 p-3 rounded-lg border border-line">
+        <div className="flex justify-between items-center mb-1 text-[11px] text-ink/60 font-maru">
+          <span>ミス率の推移 ({chunk.history.length}回)</span>
+          <span className="text-[10px]">左: 初回 → 右: 最新</span>
+        </div>
+        <div className="w-full flex justify-center">
+          <svg
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+            className="w-full max-w-[280px] h-[60px] overflow-visible"
+          >
+            <line
+              x1={paddingX}
+              y1={svgHeight - paddingY - 0.3 * (svgHeight - paddingY * 2)}
+              x2={svgWidth - paddingX}
+              y2={svgHeight - paddingY - 0.3 * (svgHeight - paddingY * 2)}
+              stroke="currentColor"
+              strokeDasharray="3 3"
+              className="text-ink/15"
+            />
+            <path
+              d={pathD}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="text-ink/80"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {points.map((p, idx) => (
+              <g key={idx}>
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r="3.5"
+                  className={
+                    p.rate > 0.4
+                      ? "fill-akashiito stroke-paper stroke-2"
+                      : "fill-ink stroke-paper stroke-2"
+                  }
+                />
+              </g>
+            ))}
+          </svg>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center">
+      <div
+        className="fixed inset-0 bg-ink/40 backdrop-blur-[2px] transition-opacity"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative z-10 w-full max-w-md bg-paper rounded-t-3xl border-t border-x border-line shadow-2xl p-6 max-h-[85vh] flex flex-col animate-in slide-in-from-bottom duration-200"
+      >
+        <div className="w-12 h-1.5 bg-ink/20 rounded-full mx-auto mb-4 cursor-grab" />
+
+        <div className="flex items-start justify-between pb-4 border-b border-line">
+          <div>
+            <div className="text-xs text-ink/60 font-maru">
+              進める日: {chunk.originDate}
+            </div>
+            <h2 className="text-xl font-bold text-ink font-mincho mt-0.5">
+              No. {chunk.rangeStart} - {chunk.rangeEnd}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 -mr-2 -mt-1 rounded-full text-ink/60 hover:text-ink hover:bg-ink/5 transition"
+            aria-label="閉じる"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto py-4 space-y-5">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-2.5 rounded-xl bg-paper border border-line text-center">
+              <div className="text-[10px] text-ink/50 font-maru">総単語数</div>
+              <div className="text-base font-bold text-ink font-mincho mt-0.5">
+                {totalWords} <span className="text-[10px] font-normal">語</span>
+              </div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-paper border border-line text-center">
+              <div className="text-[10px] text-ink/50 font-maru">解答延べ回数</div>
+              <div className="text-base font-bold text-ink font-mincho mt-0.5">
+                {chunk.totalAttempts}{" "}
+                <span className="text-[10px] font-normal">回</span>
+              </div>
+            </div>
+            <div
+              className={`p-2.5 rounded-xl border text-center ${
+                chunk.mistakeRate > 0.4
+                  ? "bg-akashiito/15 border-akashiito/30 text-akashiito"
+                  : chunk.mistakeRate > 0.15
+                  ? "bg-highlighter/20 border-highlighter/50 text-ink"
+                  : "bg-paper border-line text-ink"
+              }`}
+            >
+              <div className="text-[10px] opacity-70 font-maru">全体ミス率</div>
+              <div className="text-base font-bold font-maru mt-0.5">
+                {chunk.totalAttempts > 0 ? `${mistakePercent}%` : "-"}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-bold text-ink/70 font-maru mb-2">
+              定着の推移
+            </h3>
+            {renderHistoryGraph()}
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold text-ink/70 font-maru">
+                苦手な単語 (間違えた履歴あり)
+              </h3>
+              <span className="text-[11px] text-ink/50">
+                {chunk.mistakenWords.length} 語
+              </span>
+            </div>
+
+            {chunk.mistakenWords.length === 0 ? (
+              <div className="text-center py-6 px-4 bg-paper/50 rounded-xl border border-line text-xs text-ink/60 font-maru">
+                ✨ 間違えた単語はありません！しっかり定着しています。
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {chunk.mistakenWords.map((word) => (
+                  <div
+                    key={word.wordId}
+                    className="p-2.5 rounded-lg border border-line bg-paper flex items-center justify-between gap-3 text-left"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-bold text-ink text-sm font-mincho truncate">
+                          {word.word}
+                        </span>
+                        {word.pronunciation && (
+                          <span className="text-[11px] text-ink/40 truncate">
+                            {word.pronunciation}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-ink/70 font-maru truncate mt-0.5">
+                        {word.meaning}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-akashiito/10 text-akashiito font-bold font-maru">
+                        誤答 {word.mistakeCount}回
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="pt-3 border-t border-line">
+          <Link
+            href={`/test?mode=normal&originAssignmentId=${chunk.chunkId}`}
+            className="w-full py-3.5 px-4 rounded-xl bg-ink text-paper font-bold text-sm text-center block transition hover:opacity-90 active:scale-[0.99] shadow-sm font-maru"
+          >
+            この範囲だけミニテストを行う
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/weakness/WeaknessChunkTile.tsx
+// ==========================================
+"use client";
+
+import React from "react";
+import type { ChunkStat } from "@/lib/weakness/computeChunkStats";
+
+interface WeaknessChunkTileProps {
+  chunk: ChunkStat;
+  isSelected?: boolean;
+  onClick: () => void;
+}
+
+export function WeaknessChunkTile({
+  chunk,
+  isSelected = false,
+  onClick,
+}: WeaknessChunkTileProps) {
+  const isNoData = chunk.totalAttempts === 0;
+  const isDanger = !isNoData && chunk.mistakeRate > 0.4;
+  const isWarning = !isNoData && chunk.mistakeRate > 0.15 && chunk.mistakeRate <= 0.4;
+
+  let bgClass = "bg-paper border-line";
+  if (isDanger) {
+    bgClass = "bg-akashiito/15 border-akashiito/30";
+  } else if (isWarning) {
+    bgClass = "bg-highlighter/20 border-highlighter/50";
+  }
+
+  const formatShortDate = (dateStr: string) => {
+    try {
+      const parts = dateStr.split("-");
+      if (parts.length === 3) {
+        return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+      }
+    } catch {
+      // fallback
+    }
+    return dateStr;
+  };
+
+  const mistakePercent = Math.round(chunk.mistakeRate * 100);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`
+        relative flex flex-col justify-between p-3.5 rounded-xl border text-left transition-all
+        ${bgClass}
+        ${isSelected ? "ring-2 ring-ink ring-offset-1" : "hover:border-ink/40"}
+        w-full min-h-[110px] active:scale-[0.98]
+      `}
+    >
+      <div className="flex items-center justify-between w-full">
+        <span className="text-xs font-medium text-ink/60 font-maru">
+          {formatShortDate(chunk.originDate)}
+        </span>
+        {chunk.needsAttention && (
+          <span className="flex items-center gap-1 text-[10px] font-bold text-akashiito">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-akashiito animate-pulse" />
+            要復習
+          </span>
+        )}
+      </div>
+
+      <div className="my-1.5">
+        <div className="text-sm font-bold text-ink font-mincho">
+          No. {chunk.rangeStart} - {chunk.rangeEnd}
+        </div>
+        <div className="text-[11px] text-ink/50 font-maru">
+          {chunk.rangeEnd - chunk.rangeStart + 1} 語
+        </div>
+      </div>
+
+      <div className="flex items-baseline justify-between pt-1.5 border-t border-line/40 w-full">
+        <span className="text-[10px] text-ink/50">ミス率</span>
+        <span
+          className={`text-xs font-bold font-maru ${
+            isDanger ? "text-akashiito" : "text-ink"
+          }`}
+        >
+          {isNoData ? "未実施" : `${mistakePercent}%`}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+
+// ==========================================
+// FILE: components/weakness/WeaknessClientView.tsx
+// ==========================================
+"use client";
+
+import React, { useState } from "react";
+import Link from "next/link";
+import type { ChunkStat } from "@/lib/weakness/computeChunkStats";
+import { WeaknessChunkTile } from "./WeaknessChunkTile";
+import { WeaknessBottomSheet } from "./WeaknessBottomSheet";
+
+interface WeaknessClientViewProps {
+  chunkStats: ChunkStat[];
+}
+
+export function WeaknessClientView({ chunkStats }: WeaknessClientViewProps) {
+  const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
+
+  const selectedChunk =
+    chunkStats.find((c) => c.chunkId === selectedChunkId) || null;
+
+  const attentionCount = chunkStats.filter((c) => c.needsAttention).length;
+
+  return (
+    <main className="max-w-md mx-auto min-h-screen px-4 pt-6 pb-24 flex flex-col">
+      <div className="flex items-center justify-between mb-6">
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-1.5 text-xs text-ink/70 hover:text-ink font-maru transition py-1 px-2 rounded-lg hover:bg-ink/5"
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+          ホームへ戻る
+        </Link>
+        <span className="text-xs text-ink/40 font-maru">弱点分析</span>
+      </div>
+
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-ink font-mincho">弱点マップ</h1>
+        <p className="text-xs text-ink/60 font-maru mt-1">
+          日々の学習チャンクごとの定着度と苦手傾向を確認できます。
+        </p>
+      </div>
+
+      <div className="p-3.5 rounded-xl border border-line bg-paper mb-6 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-3 text-[11px] text-ink/70 font-maru">
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded bg-paper border border-line inline-block" />
+            良好
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded bg-highlighter/30 border border-highlighter/60 inline-block" />
+            注意
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded bg-akashiito/20 border border-akashiito/40 inline-block" />
+            要注意
+          </span>
+        </div>
+        {attentionCount > 0 && (
+          <span className="text-[11px] font-bold text-akashiito font-maru">
+            要復習 {attentionCount}件
+          </span>
+        )}
+      </div>
+
+      <div className="flex-1">
+        {chunkStats.length === 0 ? (
+          <div className="text-center py-16 px-4 bg-paper rounded-2xl border border-line">
+            <p className="text-sm font-bold text-ink font-mincho">
+              まだ学習データがありません
+            </p>
+            <p className="text-xs text-ink/60 font-maru mt-1">
+              日々のデイリーテストを解くと、ここに定着度のマップが表示されます。
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold text-ink/70 font-maru">
+                学習チャンク一覧 ({chunkStats.length})
+              </h2>
+              <span className="text-[11px] text-ink/40">タップで詳細表示</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              {chunkStats.map((chunk) => (
+                <WeaknessChunkTile
+                  key={chunk.chunkId}
+                  chunk={chunk}
+                  isSelected={chunk.chunkId === selectedChunkId}
+                  onClick={() => setSelectedChunkId(chunk.chunkId)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-8 pt-4 border-t border-line">
+        <Link
+          href="/test?mode=normal&weak=true"
+          className="w-full py-3.5 px-4 rounded-xl bg-ink text-paper font-bold text-sm text-center block transition hover:opacity-90 active:scale-[0.99] shadow-sm font-maru"
+        >
+          苦手克服テストを開始する（全範囲）
+        </Link>
+      </div>
+
+      <WeaknessBottomSheet
+        chunk={selectedChunk}
+        isOpen={!!selectedChunkId}
+        onClose={() => setSelectedChunkId(null)}
+      />
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: components/weekly-range/CycleSettingsPanel.tsx
+// ==========================================
+'use client';
+
+import type { CycleType, DayType } from '@/lib/assignment/cycleTypes';
+import { DaySequenceEditor } from './DaySequenceEditor';
+
+const START_QUICK_ADDS = [10, 50, 100];
+const PER_DAY_CHIPS = [10, 15, 20, 25, 30, 50];
+
+export interface LastWeekData {
+  rangeStart: number;
+  rangeEnd: number;
+  perDayCount: number;
+  cycleType: CycleType;
+  customDayTypes?: DayType[];
+}
+
+export function CycleSettingsPanel({
+  cycleType,
+  onChangeCycleType,
+  customDayTypes,
+  onChangeCustomDayTypes,
+  rangeStart,
+  onChangeRangeStart,
+  perDayCount,
+  onChangePerDayCount,
+  isOverflow,
+  overflowMessage,
+  lastWeek,
+  onUseLastWeekSame,
+  onUseLastWeekContinue,
+}: {
+  cycleType: CycleType;
+  onChangeCycleType: (t: CycleType) => void;
+  customDayTypes: DayType[];
+  onChangeCustomDayTypes: (t: DayType[]) => void;
+  rangeStart: number;
+  onChangeRangeStart: (n: number) => void;
+  perDayCount: number;
+  onChangePerDayCount: (n: number) => void;
+  isOverflow: boolean;
+  overflowMessage: string;
+  lastWeek?: LastWeekData;
+  onUseLastWeekSame: () => void;
+  onUseLastWeekContinue: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      {lastWeek && (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onUseLastWeekContinue}
+            className="min-h-[44px] flex-1 rounded-lg border border-line bg-white px-2 text-xs font-medium text-ink"
+          >
+            ⚡️ 先週の続きから
+            <span className="block text-[10px] text-ink/50">No.{lastWeek.rangeEnd + 1}〜 ({lastWeek.perDayCount}語/日)</span>
+          </button>
+          <button
+            type="button"
+            onClick={onUseLastWeekSame}
+            className="min-h-[44px] flex-1 rounded-lg border border-line bg-white px-2 text-xs font-medium text-ink"
+          >
+            🔄 先週と同じ範囲
+            <span className="block text-[10px] text-ink/50">No.{lastWeek.rangeStart}〜{lastWeek.rangeEnd}</span>
+          </button>
+        </div>
+      )}
+
+      <div>
+        <p className="mb-1.5 text-xs text-ink/60">学習サイクル</p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {[
+            { value: 'five_two' as const, label: '5進2戻' },
+            { value: 'four_three' as const, label: '4進3戻' },
+            { value: 'custom' as const, label: 'カスタム' },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChangeCycleType(opt.value)}
+              className={`min-h-[44px] rounded-lg border px-2 text-sm ${
+                cycleType === opt.value ? 'border-ink bg-ink text-paper font-bold' : 'border-line bg-white text-ink/70'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {cycleType === 'custom' && (
+          <div className="mt-2">
+            <p className="mb-1.5 text-xs text-ink/60">土〜金をタップして 新規/復習/休み を切り替え</p>
+            <DaySequenceEditor value={customDayTypes} onChange={onChangeCustomDayTypes} />
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-1.5 text-xs text-ink/60">開始No.</p>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={1}
+          value={rangeStart || ''}
+          onChange={(e) => onChangeRangeStart(Number(e.target.value))}
+          className="min-h-[44px] w-full rounded-lg border border-line bg-white px-3 font-maru text-ink focus:outline-none focus:ring-2 focus:ring-akashiito"
+        />
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {START_QUICK_ADDS.map((add) => (
+            <button
+              key={add}
+              type="button"
+              onClick={() => onChangeRangeStart(rangeStart + add)}
+              className="min-h-[44px] rounded-full border border-line bg-white px-3 text-sm text-ink/70"
+            >
+              +{add}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => onChangeRangeStart(1)}
+            className="min-h-[44px] rounded-full border border-line bg-white px-3 text-sm text-ink/50"
+          >
+            1に戻す
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <p className="mb-1.5 text-xs text-ink/60">1日の単語数</p>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onChangePerDayCount(Math.max(1, perDayCount - 5))}
+            className="min-h-[44px] min-w-[44px] rounded-lg border border-line bg-white font-bold text-ink"
+          >
+            −5
+          </button>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            value={perDayCount || ''}
+            onChange={(e) => onChangePerDayCount(Math.max(1, Number(e.target.value)))}
+            className="min-h-[44px] w-full rounded-lg border border-line bg-white px-3 text-center font-maru text-ink focus:outline-none focus:ring-2 focus:ring-akashiito"
+          />
+          <button
+            type="button"
+            onClick={() => onChangePerDayCount(perDayCount + 5)}
+            className="min-h-[44px] min-w-[44px] rounded-lg border border-line bg-white font-bold text-ink"
+          >
+            ＋5
+          </button>
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {PER_DAY_CHIPS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onChangePerDayCount(n)}
+              className={`min-h-[44px] rounded-full border px-3 text-sm ${
+                perDayCount === n ? 'border-ink bg-ink text-paper font-bold' : 'border-line bg-white text-ink/70'
+              }`}
+            >
+              {n}語
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isOverflow && (
+        <p className="rounded-lg border border-akashiito bg-akashiito/10 px-3 py-2 text-sm text-akashiito">
+          {overflowMessage}
+        </p>
+      )}
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/weekly-range/DaySequenceEditor.tsx
+// ==========================================
+'use client';
+
+import type { DayType } from '@/lib/assignment/cycleTypes';
+
+const DAY_LABELS = ['土', '日', '月', '火', '水', '木', '金'];
+const TYPE_ORDER: DayType[] = ['new', 'review', 'off'];
+const TYPE_LABEL: Record<DayType, string> = { new: '新規', review: '復習', off: '休み' };
+const TYPE_STYLE: Record<DayType, string> = {
+  new: 'bg-paper border-ink text-ink',
+  review: 'bg-highlighter/40 border-highlighter text-ink font-bold',
+  off: 'bg-line/30 border-line text-ink/40',
+};
+
+export function DaySequenceEditor({ value, onChange }: { value: DayType[]; onChange: (next: DayType[]) => void }) {
+  const cycleDay = (index: number) => {
+    const current = value[index];
+    const nextType = TYPE_ORDER[(TYPE_ORDER.indexOf(current) + 1) % TYPE_ORDER.length];
+    const next = [...value];
+    next[index] = nextType;
+    onChange(next);
+  };
+
+  return (
+    <div className="grid grid-cols-7 gap-1.5">
+      {DAY_LABELS.map((label, i) => (
+        <button
+          key={label}
+          type="button"
+          onClick={() => cycleDay(i)}
+          className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg border px-1 py-1.5 text-xs ${TYPE_STYLE[value[i]]}`}
+        >
+          <span>{label}</span>
+          <span className="mt-0.5 text-[10px]">{TYPE_LABEL[value[i]]}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/weekly-range/WeeklyPreviewPanel.tsx
+// ==========================================
+"use client";
+
+interface DayAssignmentPreview {
+  date: string;
+  dayOfWeek: string;
+  rangeStart: number | null;
+  rangeEnd: number | null;
+  isReviewDay: boolean;
+}
+
+interface WeeklyPreviewPanelProps {
+  days: string[];
+  dailyAssignments: DayAssignmentPreview[];
+}
+
+export function WeeklyPreviewPanel({
+  days = [],
+  dailyAssignments = [],
+}: WeeklyPreviewPanelProps) {
+  if (!dailyAssignments || dailyAssignments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="p-3.5 bg-paper rounded-xl border border-line space-y-2">
+      <div className="text-xs font-medium text-ink/70 mb-1">
+        1週間の学習プラン（プレビュー）
+      </div>
+      <div className="space-y-1.5 max-h-36 overflow-y-auto">
+        {dailyAssignments.map((item, index) => {
+          const dateLabel = item.date ? item.date.slice(5).replace("-", "/") : "";
+          const dayName = item.dayOfWeek || (days[index] ? days[index].slice(5) : `Day ${index + 1}`);
+
+          return (
+            <div
+              key={index}
+              className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-paper/70 border border-line/40 font-mono"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-ink/50 w-10 text-[11px]">{dateLabel}</span>
+                <span className="font-medium text-ink">{dayName}</span>
+              </div>
+              <div>
+                {item.isReviewDay ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-highlighter/30 text-ink">
+                    復習日
+                  </span>
+                ) : (
+                  <span className="text-ink font-semibold">
+                    No. {item.rangeStart} - {item.rangeEnd}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/weekly-range/WeeklyRangeModal.tsx
+// ==========================================
+"use client";
+
+import { useState, useEffect } from "react";
+import { WeeklyPreviewPanel } from "./WeeklyPreviewPanel";
+import { calculateWeeklyPreview } from "@/lib/assignment/calculateWeeklyPreview";
+
+interface WeeklyRangeModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  userId: string;
+  wordbookId: string;
+  weekStartStr: string;
+  onSaved?: () => void;
+}
+
+export function WeeklyRangeModal({
+  isOpen,
+  onClose,
+  userId,
+  wordbookId,
+  weekStartStr,
+  onSaved,
+}: WeeklyRangeModalProps) {
+  const [startNum, setStartNum] = useState<number>(1);
+  const [endNum, setEndNum] = useState<number>(100);
+  const [wordsPerDay, setWordsPerDay] = useState<number>(20);
+  const [pacePreset, setPacePreset] = useState<"standard" | "speed" | "review_heavy">("standard");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const preview = calculateWeeklyPreview({
+    rangeStart: startNum,
+    rangeEnd: endNum,
+    wordsPerDay,
+    pace: pacePreset,
+    weekStartDateSaturday: weekStartStr,
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (startNum > endNum) return;
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("/api/weekly-ranges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          wordbookId,
+          weekStartDate: weekStartStr,
+          rangeStart: startNum,
+          rangeEnd: endNum,
+          wordsPerDay,
+          pace: pacePreset,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "週間範囲の保存に失敗しました");
+      }
+
+      if (onSaved) onSaved();
+      onClose();
+    } catch (err: any) {
+      console.error("Weekly range save error:", err);
+      alert(err.message || "週間範囲の保存に失敗しました。再度お試しください。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
+      <div
+        className="fixed inset-0 bg-ink/40 backdrop-blur-[2px] transition-opacity"
+        onClick={onClose}
+      />
+      <div className="relative w-full max-w-lg bg-paper rounded-t-2xl sm:rounded-2xl border border-line shadow-2xl z-10 max-h-[85vh] sm:max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-200">
+        <div className="pt-3 pb-2 px-6 flex flex-col items-center border-b border-line/60 flex-shrink-0">
+          <div className="w-12 h-1 bg-ink/20 rounded-full mb-3 sm:hidden" />
+          <div className="w-full flex items-center justify-between">
+            <div>
+              <span className="text-[10px] text-ink/50 font-mono tracking-wider">WEEKLY GOAL</span>
+              <h2 className="font-mincho text-lg font-bold text-ink">今週の学習範囲を設定</h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-ink/40 hover:text-ink p-1.5 text-base transition-colors"
+              aria-label="閉じる"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-ink/70">単語の範囲（No.）</label>
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <span className="text-[10px] text-ink/40 mb-1 block">開始</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={startNum}
+                  onChange={(e) => setStartNum(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full px-3 py-2 border border-line rounded-lg bg-paper text-ink font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ink"
+                />
+              </div>
+              <span className="text-ink/40 pt-4">〜</span>
+              <div className="flex-1">
+                <span className="text-[10px] text-ink/40 mb-1 block">終了</span>
+                <input
+                  type="number"
+                  min={startNum}
+                  value={endNum}
+                  onChange={(e) => setEndNum(Math.max(startNum, parseInt(e.target.value) || startNum))}
+                  className="w-full px-3 py-2 border border-line rounded-lg bg-paper text-ink font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ink"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-ink/70">1日の進める単語数</label>
+            <div className="grid grid-cols-4 gap-2">
+              {[10, 15, 20, 30].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => setWordsPerDay(num)}
+                  className={`py-2 text-xs font-mono rounded-lg border transition-all ${
+                    wordsPerDay === num
+                      ? "bg-ink text-paper border-ink font-bold"
+                      : "bg-paper text-ink border-line hover:bg-highlighter/10"
+                  }`}
+                >
+                  {num}語
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-1">
+            <WeeklyPreviewPanel
+              days={preview?.days || []}
+              dailyAssignments={preview?.dailyAssignments || []}
+            />
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-line bg-paper/95 rounded-b-2xl flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting || startNum > endNum}
+            className="w-full py-3 bg-ink text-paper rounded-xl font-medium text-sm hover:opacity-90 active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm"
+          >
+            {isSubmitting ? "保存中..." : "この範囲で決定する"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: components/wordbook/WordbookSelector.tsx
+// ==========================================
+"use client";
+
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/common/Button";
+import { Book, CheckCircle2 } from "lucide-react";
+import type { Wordbook } from "@/types";
+
+interface WordbookSelectorProps {
+  wordbooks: Wordbook[];
+  currentWordbookId?: string | null;
+  redirectPath?: string;
+}
+
+export const WordbookSelector: React.FC<WordbookSelectorProps> = ({
+  wordbooks,
+  currentWordbookId = null,
+  redirectPath = "/dashboard",
+}) => {
+  const router = useRouter();
+  const [selectedId, setSelectedId] = useState<string | null>(
+    currentWordbookId || (wordbooks[0]?.id ?? null)
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    if (!selectedId) return;
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/users/wordbook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wordbookId: selectedId }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "設定に失敗しました");
+        return;
+      }
+
+      router.push(redirectPath);
+      router.refresh();
+    } catch {
+      setError("通信エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div className="rounded-lg bg-akashiito-subtle p-3 text-xs text-akashiito border border-akashiito-border">
+          {error}
+        </div>
+      )}
+
+      <div className="grid gap-3">
+        {wordbooks.map((wb) => {
+          const isSelected = selectedId === wb.id;
+          return (
+            <div
+              key={wb.id}
+              onClick={() => setSelectedId(wb.id)}
+              className={`cursor-pointer rounded-xl border p-4 transition-all duration-150 ${
+                isSelected
+                  ? "border-akashiito bg-akashiito-subtle/40 ring-1 ring-akashiito"
+                  : "border-line bg-paper-card hover:bg-paper-hover"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                      isSelected
+                        ? "bg-akashiito text-white"
+                        : "bg-paper text-ink-muted border border-line"
+                    }`}
+                  >
+                    <Book className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-mincho text-base font-bold text-ink">{wb.name}</h3>
+                    <p className="font-number text-xs text-ink-muted">収録語数: {wb.total_words} 語</p>
+                  </div>
+                </div>
+
+                {isSelected && <CheckCircle2 className="h-5 w-5 text-akashiito" />}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <Button variant="primary" size="lg" onClick={handleSave} disabled={!selectedId} isLoading={loading}>
+        この単語帳で決定する
+      </Button>
+    </div>
+  );
+};
+
+
+// ==========================================
+// FILE: app/(auth)/login/page.tsx
+// ==========================================
+import React from "react";
+import { LoginForm } from "@/components/auth/LoginForm";
+
+export default function LoginPage() {
+  return (
+    <main className="flex flex-1 flex-col justify-center py-6">
+      <div className="mb-6 text-center">
+        <h1 className="font-mincho text-2xl font-bold tracking-tight text-ink">毎日を積み重ねる</h1>
+        <p className="mt-2 text-xs text-ink-muted">グループ英単語共有テストにログイン</p>
+      </div>
+      <LoginForm />
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: app/(auth)/signup/page.tsx
+// ==========================================
+import React from "react";
+import { SignupForm } from "@/components/auth/SignupForm";
+
+export default function SignupPage() {
+  return (
+    <main className="flex flex-1 flex-col justify-center py-6">
+      <div className="mb-6 text-center">
+        <h1 className="font-mincho text-2xl font-bold tracking-tight text-ink">新しい仲間と始める</h1>
+        <p className="mt-2 text-xs text-ink-muted">4人グループで合格までの暗記を習慣化</p>
+      </div>
+      <SignupForm />
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: app/(main)/dashboard/page.tsx
+// ==========================================
+import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { getWeekDates, getJSTTodayString } from "@/lib/assignment/weekDates";
+import { StreakBadge } from "@/components/dashboard/StreakBadge";
+import { TodayRangeCard } from "@/components/dashboard/TodayRangeCard";
+import { WeeklySchedule } from "@/components/dashboard/WeeklySchedule";
+import { SetRangeCTA } from "@/components/dashboard/SetRangeCTA";
+import { TestCTA } from "@/components/dashboard/TestCTA";
+
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const today = getJSTTodayString();
+  const { weekStartStr, weekEndStr, days } = getWeekDates();
+
+  // 1. ユーザー情報
+  let { data: userData } = await supabase
+    .from("users")
+    .select("id, name, wordbook_id, group_id")
+    .eq("id", user.id)
+    .single();
+
+  if (!userData) {
+    const { data: newUser } = await supabase
+      .from("users")
+      .insert({
+        id: user.id,
+        name: user.user_metadata?.name || user.email?.split("@")[0] || "学習者",
+      })
+      .select()
+      .single();
+    userData = newUser;
+  }
+
+  // 2. 単語帳の自動解決
+  let activeWordbookId = userData?.wordbook_id;
+
+  if (!activeWordbookId) {
+    const { data: existingWordbooks } = await supabase
+      .from("wordbooks")
+      .select("id, name, total_words")
+      .order("name", { ascending: true })
+      .limit(1);
+
+    if (existingWordbooks && existingWordbooks.length > 0) {
+      activeWordbookId = existingWordbooks[0].id;
+      await supabase
+        .from("users")
+        .update({ wordbook_id: activeWordbookId })
+        .eq("id", user.id);
+    } else {
+      const { data: createdWb } = await supabase
+        .from("wordbooks")
+        .insert({
+          name: "標準英単語帳 (1-100)",
+          total_words: 100,
+        })
+        .select()
+        .single();
+
+      if (createdWb) {
+        activeWordbookId = createdWb.id;
+        await supabase
+          .from("users")
+          .update({ wordbook_id: activeWordbookId })
+          .eq("id", user.id);
+      }
+    }
+  }
+
+  const { data: streak } = await supabase
+    .from("streaks")
+    .select("current_streak, longest_streak, last_active_date")
+    .eq("user_id", user.id)
+    .single();
+
+  // 3. 週間範囲
+  const { data: weeklyRange } = await supabase
+    .from("weekly_ranges")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("week_start_date", weekStartStr)
+    .single();
+
+  // 4. 今週の割当一覧
+  const { data: assignments } = await supabase
+    .from("daily_assignments")
+    .select("*")
+    .eq("user_id", user.id)
+    .gte("date", weekStartStr)
+    .lte("date", weekEndStr)
+    .order("date", { ascending: true });
+
+  // 5. 今日のテスト
+  const { data: todaySession } = await supabase
+    .from("test_sessions")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("date", today)
+    .eq("type", "daily_check")
+    .single();
+
+  const todayAssignment = assignments?.find((a) => a.date === today);
+
+  return (
+    <div className="min-h-screen bg-paper pb-20">
+      <div className="max-w-xl mx-auto px-4 pt-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-xs text-ink/60 font-mono">DASHBOARD</span>
+            <h1 className="font-mincho text-xl font-bold text-ink">
+              {userData?.name || "学習者"}
+            </h1>
+          </div>
+          <StreakBadge streak={streak?.current_streak || 0} />
+        </div>
+
+        {!weeklyRange ? (
+          <SetRangeCTA
+            userId={user.id}
+            wordbookId={activeWordbookId}
+            weekStartStr={weekStartStr}
+          />
+        ) : (
+          <div className="space-y-4">
+            <TodayRangeCard
+              assignment={todayAssignment}
+              weeklyRange={weeklyRange}
+              isTestDone={!!todaySession}
+            />
+
+            <TestCTA
+              isTestDone={!!todaySession}
+              assignment={todayAssignment}
+            />
+          </div>
+        )}
+
+        {weeklyRange && assignments && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-ink/80">今週の予定</h2>
+              <Link
+                href="/weakness"
+                className="text-xs text-ink/60 hover:text-ink underline flex items-center gap-1 transition-colors"
+              >
+                <span>弱点マップを見る</span>
+                <span>→</span>
+              </Link>
+            </div>
+            <WeeklySchedule
+              days={days}
+              assignments={assignments}
+              today={today}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: app/(main)/group/page.tsx
+// ==========================================
+import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
+import { getTodayJST } from '@/lib/assignment/weekDates';
+
+export default async function GroupPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+
+  const { data: me } = await supabase.from('users').select('group_id').eq('id', user.id).single();
+  if (!me?.group_id) {
+    return (
+      <main className="mx-auto max-w-md px-4 py-6 text-center text-ink/60">
+        グループに参加していません
+      </main>
+    );
+  }
+
+  const { data: members } = await supabase
+    .from('users')
+    .select('id, name')
+    .eq('group_id', me.group_id);
+
+  const today = getTodayJST();
+  const memberIds = (members ?? []).map((m) => m.id);
+
+  const { data: todaySessions } = await supabase
+    .from('test_sessions')
+    .select('user_id, correct_count, total_count')
+    .eq('type', 'daily_check')
+    .eq('date', today)
+    .in('user_id', memberIds);
+
+  const sessionByUser = new Map((todaySessions ?? []).map((s) => [s.user_id, s]));
+  const done = (members ?? []).filter((m) => sessionByUser.has(m.id));
+  const notDone = (members ?? []).filter((m) => !sessionByUser.has(m.id));
+
+  return (
+    <main className="mx-auto max-w-md space-y-6 px-4 py-6">
+      <h1 className="font-mincho text-lg text-ink">今日のグループの様子</h1>
+
+      <section>
+        <h2 className="mb-2 text-sm text-ink/60">完了した人</h2>
+        <ul className="space-y-2">
+          {done.map((m) => {
+            const s = sessionByUser.get(m.id)!;
+            return (
+              <li
+                key={m.id}
+                className="flex items-center justify-between rounded-xl border border-line bg-white px-4 py-3"
+              >
+                <span className="text-ink">{m.name}</span>
+                <span className="font-maru text-sm text-ink/60">
+                  {s.correct_count}/{s.total_count}
+                </span>
+              </li>
+            );
+          })}
+          {done.length === 0 && <p className="text-sm text-ink/40">まだ誰もいません</p>}
+        </ul>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm text-ink/60">まだの人</h2>
+        <ul className="space-y-2">
+          {notDone.map((m) => (
+            <li
+              key={m.id}
+              className="rounded-xl border border-dashed border-line bg-white/50 px-4 py-3 text-ink/50"
+            >
+              {m.name}
+            </li>
+          ))}
+          {notDone.length === 0 && <p className="text-sm text-ink/40">全員完了しています!</p>}
+        </ul>
+      </section>
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: app/(main)/layout.tsx
+// ==========================================
+import { BottomNav } from '@/components/layout/BottomNav';
+
+export default function MainLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-paper text-ink pb-20">
+      {children}
+      <BottomNav />
+    </div>
+  );
+}
+
+
+// ==========================================
+// FILE: app/(main)/review-preview/page.tsx
+// ==========================================
+'use client';
+
+import { WordJudgeCardScreen } from '@/components/review/WordJudgeCardScreen';
+import type { WordCardData } from '@/components/review/WordJudgeCard';
+
+const MOCK_CARDS: WordCardData[] = [
+  {
+    wordId: '1',
+    headword: 'cat',
+    pronunciation: 'kæt',
+    meaning: '猫',
+    exampleSentence: 'I have a cat.',
+    studyCount: 0,
+  },
+  {
+    wordId: '2',
+    headword: 'benefit',
+    pronunciation: 'ˈbenɪfɪt',
+    meaning: '利益、恩恵',
+    exampleSentence: 'It will benefit everyone.',
+    studyCount: 2,
+  },
+  {
+    wordId: '3',
+    headword: 'consequence',
+    pronunciation: 'ˈkɑːnsəkwens',
+    meaning: '結果、影響',
+    exampleSentence: 'Consider the consequences.',
+    studyCount: 5,
+  },
+  {
+    wordId: '4',
+    headword: 'characteristically',
+    pronunciation: 'ˌkærəktəˈrɪstɪkli',
+    meaning: '特徴的に、相変わらず',
+    studyCount: 1,
+  },
+  {
+    wordId: '5',
+    headword: 'abandon',
+    pronunciation: 'əˈbændən',
+    meaning: '〜を捨てる、放棄する',
+    exampleSentence: 'He abandoned the plan.',
+    studyCount: 3,
+  },
+  {
+    wordId: '6',
+    headword: 'diminish',
+    pronunciation: 'dɪˈmɪnɪʃ',
+    meaning: '減少する、弱める',
+    studyCount: 0,
+  },
+  {
+    wordId: '7',
+    headword: 'genuine',
+    pronunciation: 'ˈdʒenjuɪn',
+    meaning: '本物の、心からの',
+    studyCount: 4,
+  },
+  {
+    wordId: '8',
+    headword: 'fluctuate',
+    pronunciation: 'ˈflʌktʃueɪt',
+    meaning: '変動する',
+    studyCount: 1,
+  },
+  {
+    wordId: '9',
+    headword: 'illustrate',
+    pronunciation: 'ˈɪləstreɪt',
+    meaning: '説明する、示す',
+    studyCount: 2,
+  },
+  {
+    wordId: '10',
+    headword: 'justify',
+    pronunciation: 'ˈdʒʌstɪfaɪ',
+    meaning: '正当化する',
+    studyCount: 0,
+  },
+];
+
+export default function ReviewPreviewPage() {
+  return (
+    <main className="mx-auto h-[100dvh] max-w-md bg-paper">
+      <WordJudgeCardScreen
+        cards={MOCK_CARDS}
+        onJudge={(wordId, isKnown) => {
+          console.log('judged', wordId, isKnown);
+        }}
+        onAllDone={() => {
+          console.log('all done');
+        }}
+      />
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: app/(main)/settings/wordbook/page.tsx
+// ==========================================
+import React from "react";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { Header } from "@/components/common/Header";
+import { WordbookSelector } from "@/components/wordbook/WordbookSelector";
+import { ChevronLeft } from "lucide-react";
+import type { Wordbook } from "@/types";
+
+export default async function SettingsWordbookPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("name, wordbook_id")
+    .eq("id", user.id)
+    .single();
+
+  const { data: wordbooks } = await supabase
+    .from("wordbooks")
+    .select("id, name, total_words, created_at")
+    .order("created_at", { ascending: true });
+
+  return (
+    <main className="w-full">
+      <Header userName={profile?.name} />
+      <div className="mb-4">
+        <Link href="/dashboard" className="inline-flex items-center text-xs font-semibold text-ink-muted hover:text-ink transition-colors">
+          <ChevronLeft className="h-4 w-4 mr-0.5" />
+          ダッシュボードへ戻る
+        </Link>
+      </div>
+      <div className="mb-6 text-left">
+        <h1 className="font-mincho text-xl font-bold tracking-tight text-ink">単語帳の変更</h1>
+        <p className="mt-1 text-xs text-ink-muted">テスト対象となる単語帳を変更します</p>
+      </div>
+      <WordbookSelector
+        wordbooks={(wordbooks as Wordbook[]) || []}
+        currentWordbookId={profile?.wordbook_id}
+        redirectPath="/dashboard"
+      />
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: app/(main)/test/page.tsx
+// ==========================================
+import React from "react";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { TestSessionRunner, type ChunkMeta } from "@/components/test/TestSessionRunner";
+import { getTodayTestWords } from "@/lib/test/getTodayTestWords";
+import { getWeakWords } from "@/lib/weakness/getWeakWords";
+import { computeChunkStats } from "@/lib/weakness/computeChunkStats";
+import type { WordCardData } from "@/components/review/WordJudgeCard";
+
+interface TestPageProps {
+  searchParams: Promise<{
+    mode?: string;
+    originAssignmentId?: string;
+    weak?: string;
+  }>;
+}
+
+export default async function TestPage({ searchParams }: TestPageProps) {
+  const { mode, originAssignmentId, weak } = await searchParams;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("wordbook_id")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.wordbook_id) {
+    redirect("/dashboard");
+  }
+
+  const isWeakMode = weak === "true" || !!originAssignmentId;
+
+  if (isWeakMode) {
+    const weakWords = await getWeakWords(user.id, profile.wordbook_id, {
+      chunkId: originAssignmentId,
+    });
+
+    if (weakWords.length === 0) {
+      return (
+        <main className="max-w-md mx-auto min-h-screen px-4 py-16 flex flex-col items-center justify-center text-center bg-paper">
+          <div className="w-16 h-16 rounded-full bg-paper border border-line flex items-center justify-center text-2xl mb-4 shadow-sm">
+            ✨
+          </div>
+          <h1 className="text-xl font-bold text-ink font-mincho mb-2">
+            苦手な単語はありません
+          </h1>
+          <p className="text-xs text-ink/60 font-maru max-w-xs mb-8">
+            現在、対象範囲の単語はすべて定着しています！素晴らしい学習ペースです。
+          </p>
+          <Link
+            href={originAssignmentId ? "/weakness" : "/dashboard"}
+            className="w-full max-w-xs py-3.5 rounded-xl bg-ink text-paper font-bold text-sm text-center block transition hover:opacity-90 font-maru"
+          >
+            {originAssignmentId ? "弱点マップへ戻る" : "ダッシュボードへ戻る"}
+          </Link>
+        </main>
+      );
+    }
+
+    const cards: WordCardData[] = weakWords.map((w) => ({
+      wordId: w.wordId,
+      headword: w.headword,
+      pronunciation: w.pronunciation,
+      meaning: w.meaning,
+      studyCount: w.studyCount,
+      originDailyAssignmentId: w.originDailyAssignmentId,
+    }));
+
+    return (
+      <TestSessionRunner
+        cards={cards}
+        dailyAssignmentId={originAssignmentId}
+        sessionType="normal"
+        isReviewDay={false}
+      />
+    );
+  }
+
+  const sessionType = mode === "normal" ? "normal" : "daily_check";
+  const testData = await getTodayTestWords(user.id, profile.wordbook_id);
+
+  if (!testData || testData.words.length === 0) {
+    return (
+      <main className="max-w-md mx-auto min-h-screen px-4 py-16 flex flex-col items-center justify-center text-center bg-paper">
+        <h1 className="text-xl font-bold text-ink font-mincho mb-2">
+          テスト対象の単語がありません
+        </h1>
+        <p className="text-xs text-ink/60 font-maru mb-8">
+          今日の学習範囲が設定されていないか、既に完了しています。
+        </p>
+        <Link
+          href="/dashboard"
+          className="w-full max-w-xs py-3.5 rounded-xl bg-ink text-paper font-bold text-sm text-center block transition hover:opacity-90 font-maru"
+        >
+          ダッシュボードへ戻る
+        </Link>
+      </main>
+    );
+  }
+
+  let chunkMetaList: ChunkMeta[] = [];
+  if (testData.isReviewDay) {
+    const chunkStats = await computeChunkStats(user.id, profile.wordbook_id);
+    chunkMetaList = chunkStats.map((stat) => {
+      const previousMistakeRate =
+        stat.history.length > 0
+          ? stat.history[stat.history.length - 1].mistakeRate
+          : null;
+
+      return {
+        chunkId: stat.chunkId,
+        rangeStart: stat.rangeStart,
+        rangeEnd: stat.rangeEnd,
+        originDate: stat.originDate,
+        previousMistakeRate,
+      };
+    });
+  }
+
+  const cards: WordCardData[] = testData.words.map((w) => ({
+    wordId: w.wordId,
+    headword: w.headword,
+    pronunciation: w.pronunciation,
+    meaning: w.meaning,
+    studyCount: w.studyCount,
+    number: w.number,
+    originDailyAssignmentId: w.originDailyAssignmentId,
+  }));
+
+  return (
+    <TestSessionRunner
+      cards={cards}
+      dailyAssignmentId={testData.dailyAssignmentId}
+      sessionType={sessionType}
+      isReviewDay={testData.isReviewDay}
+      chunkMetaList={chunkMetaList}
+    />
+  );
+}
+
+
+// ==========================================
+// FILE: app/(main)/weakness/page.tsx
+// ==========================================
+import React from "react";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { computeChunkStats } from "@/lib/weakness/computeChunkStats";
+import { WeaknessClientView } from "@/components/weakness/WeaknessClientView";
+
+export default async function WeaknessPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("wordbook_id")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.wordbook_id) {
+    redirect("/dashboard");
+  }
+
+  const chunkStats = await computeChunkStats(user.id, profile.wordbook_id);
+
+  return <WeaknessClientView chunkStats={chunkStats} />;
+}
+
+
+// ==========================================
+// FILE: app/(onboarding)/join-group/page.tsx
+// ==========================================
+import React from "react";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { Header } from "@/components/common/Header";
+import { CreateGroupForm } from "@/components/group/CreateGroupForm";
+import { JoinGroupForm } from "@/components/group/JoinGroupForm";
+
+export default async function JoinGroupPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("group_id, wordbook_id, name")
+    .eq("id", user.id)
+    .single();
+
+  if (profile?.group_id) {
+    if (!profile.wordbook_id) {
+      redirect("/select-wordbook");
+    }
+    redirect("/dashboard");
+  }
+
+  return (
+    <main className="w-full">
+      <Header userName={profile?.name} showNav={false} />
+      <div className="mb-6 text-center">
+        <h1 className="font-mincho text-2xl font-bold tracking-tight text-ink">グループに参加しよう</h1>
+        <p className="mt-2 text-xs text-ink-muted">仲間と一緒に単語テストを始める準備をします</p>
+      </div>
+      <div className="space-y-6">
+        <CreateGroupForm />
+        <div className="relative flex items-center justify-center">
+          <div className="w-full border-t border-line" />
+          <span className="absolute bg-paper px-3 text-xs font-semibold text-ink-subtle">または</span>
+        </div>
+        <JoinGroupForm />
+      </div>
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: app/(onboarding)/select-wordbook/page.tsx
+// ==========================================
+import React from "react";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { Header } from "@/components/common/Header";
+import { WordbookSelector } from "@/components/wordbook/WordbookSelector";
+import type { Wordbook } from "@/types";
+
+export default async function SelectWordbookPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("name, group_id, wordbook_id")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.group_id) {
+    redirect("/join-group");
+  }
+
+  const { data: wordbooks } = await supabase
+    .from("wordbooks")
+    .select("id, name, total_words, created_at")
+    .order("created_at", { ascending: true });
+
+  return (
+    <main className="w-full">
+      <Header userName={profile.name} showNav={false} />
+      <div className="mb-6 text-center">
+        <h1 className="font-mincho text-2xl font-bold tracking-tight text-ink">使用する単語帳を選択</h1>
+        <p className="mt-2 text-xs text-ink-muted">各自が使う単語帳を選んでください</p>
+      </div>
+      <WordbookSelector
+        wordbooks={(wordbooks as Wordbook[]) || []}
+        currentWordbookId={profile.wordbook_id}
+        redirectPath="/dashboard"
+      />
+    </main>
+  );
+}
+
+
+// ==========================================
+// FILE: app/api/groups/route.ts
+// ==========================================
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+
+function generateInviteCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let result = "";
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+export async function POST(request: Request) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { action, name, inviteCode } = body;
+
+    if (action === "create") {
+      if (!name || typeof name !== "string" || name.trim().length === 0) {
+        return NextResponse.json({ error: "グループ名を入力してください" }, { status: 400 });
+      }
+
+      let code = generateInviteCode();
+      let insertedGroup = null;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await supabase
+          .from("groups")
+          .insert({ name: name.trim(), invite_code: code })
+          .select()
+          .single();
+
+        if (!error && data) {
+          insertedGroup = data;
+          break;
+        }
+        code = generateInviteCode();
+      }
+
+      if (!insertedGroup) {
+        return NextResponse.json({ error: "グループ作成に失敗しました" }, { status: 500 });
+      }
+
+      await supabase.from("users").update({ group_id: insertedGroup.id }).eq("id", user.id);
+      return NextResponse.json({ success: true, group: insertedGroup });
+    }
+
+    if (action === "join") {
+      if (!inviteCode || typeof inviteCode !== "string") {
+        return NextResponse.json({ error: "招待コードを入力してください" }, { status: 400 });
+      }
+
+      const cleanCode = inviteCode.trim().toUpperCase();
+      const { data: group, error: findError } = await supabase
+        .from("groups")
+        .select("id, name, invite_code")
+        .eq("invite_code", cleanCode)
+        .single();
+
+      if (findError || !group) {
+        return NextResponse.json({ error: "該当する招待コードのグループが見つかりません" }, { status: 404 });
+      }
+
+      await supabase.from("users").update({ group_id: group.id }).eq("id", user.id);
+      return NextResponse.json({ success: true, group });
+    }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  } catch (err) {
+    return NextResponse.json({ error: "内部サーバーエラーが発生しました" }, { status: 500 });
+  }
+}
+
+
+// ==========================================
+// FILE: app/api/test-sessions/complete/route.ts
+// ==========================================
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getTodayJST } from "@/lib/assignment/weekDates";
+import { updateStreak } from "@/lib/streak/updateStreak";
+import { resolveOriginAssignment } from "@/lib/test/resolveOriginAssignment";
+
+interface CompletePayload {
+  dailyAssignmentId?: string | null;
+  type: "daily_check" | "normal";
+  results: Array<{
+    wordId: string;
+    isKnown: boolean;
+    originDailyAssignmentId?: string;
+  }>;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body: CompletePayload = await req.json();
+    const { dailyAssignmentId, type, results } = body;
+
+    if (!results || !Array.isArray(results) || results.length === 0) {
+      return NextResponse.json(
+        { error: "Invalid results payload" },
+        { status: 400 }
+      );
+    }
+
+    const today = getTodayJST();
+
+    if (type === "daily_check") {
+      const { data: existingSession } = await supabase
+        .from("test_sessions")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("date", today)
+        .eq("type", "daily_check")
+        .maybeSingle();
+
+      if (existingSession) {
+        return NextResponse.json(
+          { error: "Daily check test already completed today" },
+          { status: 409 }
+        );
+      }
+    }
+
+    const { data: profile } = await supabase
+      .from("users")
+      .select("wordbook_id")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile?.wordbook_id) {
+      return NextResponse.json(
+        { error: "User wordbook not found" },
+        { status: 400 }
+      );
+    }
+
+    const correctCount = results.filter((r) => r.isKnown).length;
+    const totalCount = results.length;
+
+    const { data: session, error: sessionError } = await supabase
+      .from("test_sessions")
+      .insert({
+        user_id: user.id,
+        date: today,
+        type,
+        correct_count: correctCount,
+        total_count: totalCount,
+      })
+      .select("id")
+      .single();
+
+    if (sessionError || !session) {
+      console.error("Failed to insert test_sessions:", sessionError);
+      return NextResponse.json(
+        { error: "Failed to create test session" },
+        { status: 500 }
+      );
+    }
+
+    const wordIds = results.map((r) => r.wordId);
+    const originMap = await resolveOriginAssignment(
+      user.id,
+      profile.wordbook_id,
+      wordIds
+    );
+
+    const answerRows = results.map((r) => ({
+      session_id: session.id,
+      word_id: r.wordId,
+      is_known: r.isKnown,
+      origin_daily_assignment_id:
+        r.originDailyAssignmentId ||
+        originMap.get(r.wordId) ||
+        (dailyAssignmentId ?? null),
+    }));
+
+    const { error: answersError } = await supabase
+      .from("test_answers")
+      .insert(answerRows);
+
+    if (answersError) {
+      console.error("Failed to insert test_answers:", answersError);
+    }
+
+    await updateStreak(user.id, today);
+
+    return NextResponse.json({
+      success: true,
+      sessionId: session.id,
+      correctCount,
+      totalCount,
+    });
+  } catch (err: unknown) {
+    console.error("Complete API error:", err);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
+  }
+}
+
+
+// ==========================================
+// FILE: app/api/users/wordbook/route.ts
+// ==========================================
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+
+export async function POST(request: Request) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { wordbookId } = await request.json();
+    if (!wordbookId) {
+      return NextResponse.json({ error: "単語帳を選択してください" }, { status: 400 });
+    }
+
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({ wordbook_id: wordbookId })
+      .eq("id", user.id);
+
+    if (updateError) {
+      return NextResponse.json({ error: "単語帳の設定に失敗しました" }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return NextResponse.json({ error: "内部サーバーエラーが発生しました" }, { status: 500 });
+  }
+}
+
+
+// ==========================================
+// FILE: app/api/weekly-ranges/route.ts
+// ==========================================
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { calculateWeeklyPreview } from "@/lib/assignment/calculateWeeklyPreview";
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      userId,
+      wordbookId,
+      weekStartDate,
+      rangeStart,
+      rangeEnd,
+      wordsPerDay,
+      pace,
+    } = body;
+
+    if (!userId || !wordbookId || !weekStartDate || !rangeStart || !rangeEnd) {
+      return NextResponse.json(
+        { error: "必須項目が不足しています" },
+        { status: 400 }
+      );
+    }
+
+    const supabase = await createClient();
+
+    const { data: rangeData, error: rangeError } = await supabase
+      .from("weekly_ranges")
+      .upsert(
+        {
+          user_id: userId,
+          wordbook_id: wordbookId,
+          week_start_date: weekStartDate,
+          range_start: rangeStart,
+          range_end: rangeEnd,
+        },
+        { onConflict: "user_id,week_start_date" }
+      )
+      .select()
+      .single();
+
+    if (rangeError) {
+      console.error("Failed to upsert weekly_range:", rangeError);
+      return NextResponse.json(
+        { error: "週間範囲の保存に失敗しました" },
+        { status: 500 }
+      );
+    }
+
+    const preview = calculateWeeklyPreview({
+      rangeStart,
+      rangeEnd,
+      wordsPerDay: wordsPerDay || 20,
+      pace: pace || "standard",
+      weekStartDateSaturday: weekStartDate,
+    });
+
+    const dailyRows = preview.dailyAssignments.map((item) => ({
+      user_id: userId,
+      wordbook_id: wordbookId,
+      date: item.date,
+      range_start: item.rangeStart,
+      range_end: item.rangeEnd,
+      is_review_day: item.isReviewDay,
+    }));
+
+    const { error: assignError } = await supabase
+      .from("daily_assignments")
+      .upsert(dailyRows, { onConflict: "user_id,date" });
+
+    if (assignError) {
+      console.error("Failed to upsert daily_assignments:", assignError);
+      return NextResponse.json(
+        { error: "日次割当の作成に失敗しました" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true, range: rangeData });
+  } catch (error: any) {
+    console.error("POST /api/weekly-ranges exception:", error);
+    return NextResponse.json(
+      { error: error.message || "予期しないエラーが発生しました" },
+      { status: 500 }
+    );
+  }
+}
+
+
+// ==========================================
+// FILE: app/layout.tsx
+// ==========================================
+import type { Metadata } from "next";
+import { Shippori_Mincho, Zen_Kaku_Gothic_New, Zen_Maru_Gothic } from "next/font/google";
+import "./globals.css";
+
+const shipporiMincho = Shippori_Mincho({
+  weight: ["500", "700"],
+  subsets: ["latin"],
+  variable: "--font-shippori",
+  display: "swap",
+});
+
+const zenKakuGothic = Zen_Kaku_Gothic_New({
+  weight: ["400", "500", "700"],
+  subsets: ["latin"],
+  variable: "--font-zen-kaku",
+  display: "swap",
+});
+
+const zenMaruGothic = Zen_Maru_Gothic({
+  weight: ["500", "700"],
+  subsets: ["latin"],
+  variable: "--font-zen-maru",
+  display: "swap",
+});
+
+export const metadata: Metadata = {
+  title: "英単語グループ学習",
+  description: "少人数グループで日々の単語テストを継続する受験生向けアプリ",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html
+      lang="ja"
+      className={`${shipporiMincho.variable} ${zenKakuGothic.variable} ${zenMaruGothic.variable}`}
+    >
+      <body className="flex min-h-screen flex-col items-center justify-start bg-paper">
+        <div className="w-full max-w-md min-h-screen flex flex-col px-4 py-6 sm:px-6">
+          {children}
+        </div>
+      </body>
+    </html>
+  );
+}
+
+
+// ==========================================
+// FILE: app/page.tsx
+// ==========================================
+import Image from "next/image";
+
+export default function Home() {
+  return (
+    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
+        <Image
+          className="dark:invert h-5 w-[100px]"
+          src="/next.svg"
+          alt="Next.js logo"
+          width={100}
+          height={20}
+          priority
+        />
+        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
+          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
+            To get started, edit the{" "}
+            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
+              page.tsx
+            </code>{" "}
+            file.
+          </h1>
+          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
+            Looking for a starting point or more instructions? Head over to{" "}
+            <a
+              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+              className="font-medium text-zinc-950 dark:text-zinc-50"
+            >
+              Templates
+            </a>{" "}
+            or the{" "}
+            <a
+              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+              className="font-medium text-zinc-950 dark:text-zinc-50"
+            >
+              Learning
+            </a>{" "}
+            center.
+          </p>
+        </div>
+        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
+          <a
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
+            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Image
+              className="dark:invert h-[14px] w-4"
+              src="/vercel.svg"
+              alt="Vercel logomark"
+              width={16}
+              height={14}
+            />
+            Deploy Now
+          </a>
+          <a
+            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
+            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Documentation
+          </a>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+
