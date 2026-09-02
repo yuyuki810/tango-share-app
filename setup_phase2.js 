@@ -1,482 +1,85 @@
 /**
- * 週間範囲設定UI & ナビゲーションバー干渉バグ修正スクリプト
- * 実行方法: node setup_phase2.js
+ * setup_phase2.js
+ * フェーズB: 弱点分析・苦手克服テスト ＆ 最新単語判定カードUI 一括生成・更新スクリプト
+ * 実行コマンド: node setup_phase2.js
  */
-const fs = require("fs");
-const path = require("path");
 
-const files = {
-  // 1. 週間範囲設定モーダル (z-index を z-[60] に引き上げ、スクロール領域と固定フッターを最適化)
-  "components/weekly-range/WeeklyRangeModal.tsx": `"use client";
+const fs = require('fs');
+const path = require('path');
 
-import { useState, useEffect } from "react";
-import { WeeklyPreviewPanel } from "./WeeklyPreviewPanel";
-import { calculateWeeklyPreview } from "@/lib/assignment/calculateWeeklyPreview";
-
-interface WeeklyRangeModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  userId: string;
-  wordbookId: string;
-  weekStartStr: string;
-  onSaved?: () => void;
+function ensureDirectoryExistence(filePath) {
+  const dirname = path.dirname(filePath);
+  if (fs.existsSync(dirname)) {
+    return true;
+  }
+  ensureDirectoryExistence(dirname);
+  fs.mkdirSync(dirname, { recursive: true });
 }
 
-export function WeeklyRangeModal({
-  isOpen,
-  onClose,
-  userId,
-  wordbookId,
-  weekStartStr,
-  onSaved,
-}: WeeklyRangeModalProps) {
-  const [startNum, setStartNum] = useState<number>(1);
-  const [endNum, setEndNum] = useState<number>(100);
-  const [wordsPerDay, setWordsPerDay] = useState<number>(20);
-  const [pacePreset, setPacePreset] = useState<"standard" | "speed" | "review_heavy">("standard");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+function writeFile(relativeFilePath, content) {
+  const fullPath = path.join(process.cwd(), relativeFilePath);
+  ensureDirectoryExistence(fullPath);
+  fs.writeFileSync(fullPath, content.trim() + '\n', 'utf8');
+  console.log(`  [CREATED/UPDATED] ${relativeFilePath}`);
+}
 
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  const preview = calculateWeeklyPreview({
-    rangeStart: startNum,
-    rangeEnd: endNum,
-    wordsPerDay,
-    pace: pacePreset,
-    weekStartDateSaturday: weekStartStr,
-  });
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (startNum > endNum) return;
-    setIsSubmitting(true);
-
-    try {
-      const res = await fetch("/api/weekly-ranges", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId,
-          wordbookId,
-          weekStartDate: weekStartStr,
-          rangeStart: startNum,
-          rangeEnd: endNum,
-          wordsPerDay,
-          pace: pacePreset,
-        }),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || "週間範囲の保存に失敗しました");
+const files = {
+  "lib/weakness/computeChunkStats.ts": "import type { SupabaseClient } from '@supabase/supabase-js';\n\nexport interface ChunkMistakeWord {\n  wordId: string;\n  headword: string;\n  pronunciation?: string;\n  meaning: string;\n  number: number;\n  wrongCount: number;\n  totalCount: number;\n}\n\nexport interface ChunkStat {\n  chunkId: string;        // daily_assignments.id(進める日)\n  rangeStart: number;\n  rangeEnd: number;\n  originDate: string;     // その進める日の日付(タイル表示用ラベル)\n  totalAttempts: number;  // このチャンクの単語が解答された延べ回数\n  mistakeCount: number;\n  mistakeRate: number;    // 0〜1\n  history: Array<{ testDate: string; mistakeRate: number }>; // 時系列(古い→新しい)\n  needsAttention: boolean; // 直近2件の平均mistakeRate > 0.3 (1件以下ならその1件 > 0.3)\n  mistakeWords: ChunkMistakeWord[];\n}\n\nexport async function computeChunkStats(\n  supabase: SupabaseClient,\n  userId: string,\n  wordbookId: string\n): Promise<ChunkStat[]> {\n  // 1. 対象ユーザー・単語帳の「進める日 (is_review_day = false)」の daily_assignments を取得\n  const { data: assignments, error: assignError } = await supabase\n    .from('daily_assignments')\n    .select('id, range_start, range_end, date')\n    .eq('user_id', userId)\n    .eq('wordbook_id', wordbookId)\n    .eq('is_review_day', false)\n    .order('date', { ascending: true });\n\n  if (assignError || !assignments || assignments.length === 0) {\n    return [];\n  }\n\n  const chunkIds = assignments.map((a) => a.id);\n\n  // 2. 対象チャンクに紐づく test_answers を取得\n  const { data: answers } = await supabase\n    .from('test_answers')\n    .select(\n      'id, is_known, origin_daily_assignment_id, word_id, session_id, created_at, test_sessions!inner(id, user_id, date, created_at)'\n    )\n    .eq('test_sessions.user_id', userId)\n    .in('origin_daily_assignment_id', chunkIds)\n    .order('created_at', { ascending: true });\n\n  const allAnswers = answers ?? [];\n  const allWordIds = Array.from(new Set(allAnswers.map((a) => a.word_id)));\n  const wordMap = new Map<\n    string,\n    { id: string; word: string; pronunciation?: string | null; meaning: string; number: number }\n  >();\n\n  if (allWordIds.length > 0) {\n    const { data: words } = await supabase\n      .from('words')\n      .select('id, word, pronunciation, meaning, number')\n      .in('id', allWordIds);\n\n    (words ?? []).forEach((w) => {\n      wordMap.set(w.id, w);\n    });\n  }\n\n  const answersByChunk = new Map<string, typeof allAnswers>();\n  allAnswers.forEach((ans) => {\n    const cid = ans.origin_daily_assignment_id;\n    if (!cid) return;\n    const list = answersByChunk.get(cid) ?? [];\n    list.push(ans);\n    answersByChunk.set(cid, list);\n  });\n\n  return assignments.map((assignment) => {\n    const chunkAnswers = answersByChunk.get(assignment.id) ?? [];\n    const totalAttempts = chunkAnswers.length;\n    const mistakeCount = chunkAnswers.filter((a) => !a.is_known).length;\n    const mistakeRate = totalAttempts > 0 ? mistakeCount / totalAttempts : 0;\n\n    // history: セッションごとにグルーピング\n    const sessionMap = new Map<string, { date: string; created_at: string; answers: typeof chunkAnswers }>();\n    chunkAnswers.forEach((ans) => {\n      const sessionRaw = ans.test_sessions;\n      const session = Array.isArray(sessionRaw) ? sessionRaw[0] : sessionRaw;\n      if (!session) return;\n      const sId = session.id;\n      if (!sessionMap.has(sId)) {\n        sessionMap.set(sId, { date: session.date, created_at: session.created_at, answers: [] });\n      }\n      sessionMap.get(sId)!.answers.push(ans);\n    });\n\n    const sortedSessions = Array.from(sessionMap.values()).sort((a, b) =>\n      a.created_at.localeCompare(b.created_at)\n    );\n\n    const history = sortedSessions.map((s) => {\n      const sTotal = s.answers.length;\n      const sMistakes = s.answers.filter((a) => !a.is_known).length;\n      return {\n        testDate: s.date,\n        mistakeRate: sTotal > 0 ? Math.round((sMistakes / sTotal) * 100) / 100 : 0,\n      };\n    });\n\n    // needsAttention 判定\n    let needsAttention = false;\n    if (history.length === 1) {\n      needsAttention = history[0].mistakeRate > 0.3;\n    } else if (history.length >= 2) {\n      const recent2 = history.slice(-2);\n      const avg = (recent2[0].mistakeRate + recent2[1].mistakeRate) / 2;\n      needsAttention = avg > 0.3;\n    }\n\n    // 間違えた単語リストの集約\n    const wordStatsMap = new Map<string, { mistakes: number; total: number }>();\n    chunkAnswers.forEach((a) => {\n      const cur = wordStatsMap.get(a.word_id) ?? { mistakes: 0, total: 0 };\n      cur.total += 1;\n      if (!a.is_known) cur.mistakes += 1;\n      wordStatsMap.set(a.word_id, cur);\n    });\n\n    const mistakeWords: ChunkMistakeWord[] = [];\n    wordStatsMap.forEach((stats, wordId) => {\n      if (stats.mistakes > 0) {\n        const wInfo = wordMap.get(wordId);\n        if (wInfo) {\n          mistakeWords.push({\n            wordId: wInfo.id,\n            headword: wInfo.word,\n            pronunciation: wInfo.pronunciation ?? undefined,\n            meaning: wInfo.meaning,\n            number: wInfo.number,\n            wrongCount: stats.mistakes,\n            totalCount: stats.total,\n          });\n        }\n      }\n    });\n\n    mistakeWords.sort((a, b) => b.wrongCount - a.wrongCount || a.number - b.number);\n\n    return {\n      chunkId: assignment.id,\n      rangeStart: assignment.range_start,\n      rangeEnd: assignment.range_end,\n      originDate: assignment.date,\n      totalAttempts,\n      mistakeCount,\n      mistakeRate: Math.round(mistakeRate * 100) / 100,\n      history,\n      needsAttention,\n      mistakeWords,\n    };\n  });\n}\n",
+  "lib/weakness/getWeakWords.ts": "import type { SupabaseClient } from '@supabase/supabase-js';\n\nexport interface WeakWordCard {\n  wordId: string;\n  headword: string;\n  pronunciation?: string;\n  meaning: string;\n  studyCount: number;\n  mistakeRate: number; // 0〜1\n  number?: number;\n  originDailyAssignmentId?: string;\n}\n\nexport async function getWeakWords(\n  supabase: SupabaseClient,\n  userId: string,\n  wordbookId: string,\n  scope?: { chunkId?: string }\n): Promise<WeakWordCard[]> {\n  let wordQuery = supabase\n    .from('words')\n    .select('id, word, pronunciation, meaning, number')\n    .eq('wordbook_id', wordbookId);\n\n  const targetChunkId = scope?.chunkId;\n\n  if (targetChunkId) {\n    const { data: chunk } = await supabase\n      .from('daily_assignments')\n      .select('id, range_start, range_end')\n      .eq('id', targetChunkId)\n      .eq('user_id', userId)\n      .single();\n\n    if (!chunk) return [];\n\n    wordQuery = wordQuery\n      .gte('number', chunk.range_start)\n      .lte('number', chunk.range_end);\n  }\n\n  const { data: words, error: wordsError } = await wordQuery.order('number', { ascending: true });\n  if (wordsError || !words || words.length === 0) return [];\n\n  const wordIds = words.map((w) => w.id);\n\n  const { data: answers, error: answersError } = await supabase\n    .from('test_answers')\n    .select('word_id, is_known, created_at, origin_daily_assignment_id, test_sessions!inner(user_id)')\n    .eq('test_sessions.user_id', userId)\n    .in('word_id', wordIds)\n    .order('created_at', { ascending: true });\n\n  if (answersError || !answers || answers.length === 0) {\n    return [];\n  }\n\n  const answersByWord = new Map<\n    string,\n    Array<{ is_known: boolean; created_at: string; origin_daily_assignment_id?: string | null }>\n  >();\n  answers.forEach((a) => {\n    const list = answersByWord.get(a.word_id) ?? [];\n    list.push(a);\n    answersByWord.set(a.word_id, list);\n  });\n\n  const weakCards: WeakWordCard[] = [];\n\n  for (const word of words) {\n    const wordAnswers = answersByWord.get(word.id);\n    if (!wordAnswers || wordAnswers.length === 0) continue;\n\n    const totalAttempts = wordAnswers.length;\n    const mistakeCount = wordAnswers.filter((a) => !a.is_known).length;\n    const mistakeRate = mistakeCount / totalAttempts;\n    const lastAnswer = wordAnswers[wordAnswers.length - 1];\n\n    // 抽出基準: 直近解答が「わからなかった」 または mistakeRate >= 0.4\n    const isWeak = !lastAnswer.is_known || mistakeRate >= 0.4;\n\n    if (isWeak) {\n      weakCards.push({\n        wordId: word.id,\n        headword: word.word,\n        pronunciation: word.pronunciation ?? undefined,\n        meaning: word.meaning,\n        studyCount: totalAttempts,\n        mistakeRate: Math.round(mistakeRate * 100) / 100,\n        number: word.number,\n        originDailyAssignmentId: targetChunkId || lastAnswer.origin_daily_assignment_id || undefined,\n      });\n    }\n  }\n\n  // ミス率降順 & 番号順で最大50語に絞る\n  weakCards.sort((a, b) => b.mistakeRate - a.mistakeRate || (a.number ?? 0) - (b.number ?? 0));\n\n  return weakCards.slice(0, 50);\n}\n",
+  "lib/test/getTodayTestWords.ts": "import type { SupabaseClient } from '@supabase/supabase-js';\n\nexport interface TestWordCard {\n  wordId: string;\n  headword: string;\n  pronunciation?: string;\n  meaning: string;\n  studyCount: number;\n  originDailyAssignmentId?: string;\n  number?: number;\n}\n\nexport interface ReviewChunkSummaryInfo {\n  chunkId: string;\n  rangeStart: number;\n  rangeEnd: number;\n  originDate: string;\n  prevMistakeRate: number | null;\n}\n\nexport interface TodayTestContext {\n  dailyAssignmentId: string;\n  wordbookId: string;\n  isReviewDay: boolean;\n  rangeStart: number;\n  rangeEnd: number;\n  cards: TestWordCard[];\n  reviewChunks?: ReviewChunkSummaryInfo[];\n}\n\nexport async function getTodayTestContext(\n  supabase: SupabaseClient,\n  userId: string,\n  today: string // YYYY-MM-DD\n): Promise<TodayTestContext | null> {\n  const { data: assignment } = await supabase\n    .from('daily_assignments')\n    .select('id, wordbook_id, range_start, range_end, is_review_day')\n    .eq('user_id', userId)\n    .eq('date', today)\n    .maybeSingle();\n\n  if (!assignment) return null;\n\n  const { data: words } = await supabase\n    .from('words')\n    .select('id, word, pronunciation, meaning, number')\n    .eq('wordbook_id', assignment.wordbook_id)\n    .gte('number', assignment.range_start)\n    .lte('number', assignment.range_end)\n    .order('number', { ascending: true });\n\n  const wordList = words ?? [];\n  const studyCounts = await getStudyCounts(\n    supabase,\n    userId,\n    wordList.map((w) => w.id)\n  );\n\n  let reviewChunks: ReviewChunkSummaryInfo[] | undefined;\n  const chunkByRange: Array<{ id: string; range_start: number; range_end: number; date: string }> = [];\n\n  if (assignment.is_review_day) {\n    const { data: progressAssignments } = await supabase\n      .from('daily_assignments')\n      .select('id, range_start, range_end, date')\n      .eq('user_id', userId)\n      .eq('wordbook_id', assignment.wordbook_id)\n      .eq('is_review_day', false)\n      .gte('range_start', assignment.range_start)\n      .lte('range_end', assignment.range_end)\n      .order('range_start', { ascending: true });\n\n    const pList = progressAssignments ?? [];\n    chunkByRange.push(...pList);\n\n    if (pList.length > 0) {\n      const pIds = pList.map((p) => p.id);\n      const { data: prevAnswers } = await supabase\n        .from('test_answers')\n        .select('is_known, origin_daily_assignment_id, created_at, session_id, test_sessions!inner(user_id, date, created_at)')\n        .eq('test_sessions.user_id', userId)\n        .in('origin_daily_assignment_id', pIds)\n        .order('created_at', { ascending: true });\n\n      const answersByChunk = new Map<string, Array<{ is_known: boolean; sessionId: string; created_at: string }>>();\n      (prevAnswers ?? []).forEach((a) => {\n        const cid = a.origin_daily_assignment_id;\n        if (!cid) return;\n        const list = answersByChunk.get(cid) ?? [];\n        list.push({ is_known: a.is_known, sessionId: a.session_id, created_at: a.created_at });\n        answersByChunk.set(cid, list);\n      });\n\n      reviewChunks = pList.map((p) => {\n        const cAnswers = answersByChunk.get(p.id) ?? [];\n        let prevMistakeRate: number | null = null;\n        if (cAnswers.length > 0) {\n          const sessionGroups = new Map<string, typeof cAnswers>();\n          cAnswers.forEach((ans) => {\n            const list = sessionGroups.get(ans.sessionId) ?? [];\n            list.push(ans);\n            sessionGroups.set(ans.sessionId, list);\n          });\n          const lastSessionAnswers = Array.from(sessionGroups.values()).pop();\n          if (lastSessionAnswers && lastSessionAnswers.length > 0) {\n            const mistakes = lastSessionAnswers.filter((a) => !a.is_known).length;\n            prevMistakeRate = Math.round((mistakes / lastSessionAnswers.length) * 100) / 100;\n          }\n        }\n        return {\n          chunkId: p.id,\n          rangeStart: p.range_start,\n          rangeEnd: p.range_end,\n          originDate: p.date,\n          prevMistakeRate,\n        };\n      });\n    }\n  }\n\n  const cards: TestWordCard[] = wordList.map((w) => {\n    let originDailyAssignmentId: string | undefined;\n    if (assignment.is_review_day) {\n      const matched = chunkByRange.find(\n        (c) => w.number >= c.range_start && w.number <= c.range_end\n      );\n      originDailyAssignmentId = matched?.id;\n    } else {\n      originDailyAssignmentId = assignment.id;\n    }\n\n    return {\n      wordId: w.id,\n      headword: w.word,\n      pronunciation: w.pronunciation ?? undefined,\n      meaning: w.meaning,\n      studyCount: studyCounts.get(w.id) ?? 0,\n      originDailyAssignmentId,\n      number: w.number,\n    };\n  });\n\n  return {\n    dailyAssignmentId: assignment.id,\n    wordbookId: assignment.wordbook_id,\n    isReviewDay: assignment.is_review_day,\n    rangeStart: assignment.range_start,\n    rangeEnd: assignment.range_end,\n    cards,\n    reviewChunks,\n  };\n}\n\nasync function getStudyCounts(\n  supabase: SupabaseClient,\n  userId: string,\n  wordIds: string[]\n): Promise<Map<string, number>> {\n  if (wordIds.length === 0) return new Map();\n\n  const { data } = await supabase\n    .from('test_answers')\n    .select('word_id, test_sessions!inner(user_id)')\n    .eq('test_sessions.user_id', userId)\n    .in('word_id', wordIds);\n\n  const counts = new Map<string, number>();\n  (data ?? []).forEach((row: { word_id: string }) => {\n    counts.set(row.word_id, (counts.get(row.word_id) ?? 0) + 1);\n  });\n  return counts;\n}\n",
+  "components/review/WordJudgeCard.tsx": "'use client';\n\nimport { useState, useRef, type PointerEvent as ReactPointerEvent } from 'react';\n\nexport interface WordCardData {\n  wordId: string;\n  headword: string;\n  pronunciation?: string;\n  meaning: string;\n  exampleSentence?: string;\n  studyCount: number; // これまでの学習回数(0 = 初めて)\n  originDailyAssignmentId?: string;\n  number?: number;\n}\n\ninterface WordJudgeCardProps {\n  card: WordCardData;\n  isTop: boolean; // スタックの一番手前かどうか(操作を受け付けるのは一番手前のみ)\n  stackOffset: number; // 0 = 一番手前, 1 = 1枚奥, ...\n  onJudge: (isKnown: boolean) => void;\n}\n\nconst SWIPE_THRESHOLD_RATIO = 0.25;\n\n/** 文字数に応じた動的フォントサイズ（改行を防止しつつ最大限大きく表示） */\nfunction getHeadwordFontSize(word: string): string {\n  const len = word.length;\n  if (len <= 8) return 'text-5xl sm:text-6xl';\n  if (len <= 12) return 'text-4xl sm:text-5xl';\n  if (len <= 16) return 'text-3xl sm:text-4xl';\n  return 'text-2xl sm:text-3xl';\n}\n\nexport function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCardProps) {\n  const [isRevealed, setIsRevealed] = useState(false);\n  const [dragX, setDragX] = useState(0);\n  const [isDragging, setIsDragging] = useState(false);\n  const [exitDirection, setExitDirection] = useState<'left' | 'right' | null>(null);\n\n  const dragStartX = useRef<number | null>(null);\n  const dragStartY = useRef<number | null>(null);\n  const isPointerDown = useRef<boolean>(false);\n  const cardRef = useRef<HTMLDivElement>(null);\n\n  const handleReveal = () => {\n    if (!isRevealed) {\n      setIsRevealed(true);\n    }\n  };\n\n  const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {\n    if (!isTop || exitDirection !== null) return;\n    if ((e.target as HTMLElement).closest('button[data-action=\"judge\"]')) return;\n\n    dragStartX.current = e.clientX;\n    dragStartY.current = e.clientY;\n    isPointerDown.current = true;\n    e.currentTarget.setPointerCapture(e.pointerId);\n  };\n\n  const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {\n    if (!isPointerDown.current || dragStartX.current === null) return;\n\n    const deltaX = e.clientX - dragStartX.current;\n    const deltaY = e.clientY - (dragStartY.current ?? e.clientY);\n\n    // 未開示状態のときはスワイプさせずタップ判定待機\n    if (!isRevealed) return;\n\n    // 水平方向への明確なドラッグを検知\n    if (!isDragging && Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY)) {\n      setIsDragging(true);\n    }\n\n    if (isDragging) {\n      setDragX(deltaX);\n    }\n  };\n\n  const handlePointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {\n    if (!isPointerDown.current) return;\n\n    const deltaX = dragStartX.current !== null ? e.clientX - dragStartX.current : 0;\n    const deltaY = dragStartY.current !== null ? e.clientY - dragStartY.current : 0;\n    const isTap = Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10;\n\n    // カードのどこをタップしても開示\n    if (!isRevealed && isTap) {\n      handleReveal();\n    } else if (isRevealed && isDragging) {\n      const width = cardRef.current?.offsetWidth ?? 320;\n      if (Math.abs(dragX) > width * SWIPE_THRESHOLD_RATIO) {\n        commitJudge(dragX > 0);\n      } else {\n        setDragX(0);\n      }\n    } else {\n      setDragX(0);\n    }\n\n    dragStartX.current = null;\n    dragStartY.current = null;\n    isPointerDown.current = false;\n    setIsDragging(false);\n\n    try {\n      if (e.currentTarget.hasPointerCapture(e.pointerId)) {\n        e.currentTarget.releasePointerCapture(e.pointerId);\n      }\n    } catch {\n      // ignore\n    }\n  };\n\n  const handlePointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {\n    dragStartX.current = null;\n    dragStartY.current = null;\n    isPointerDown.current = false;\n    setIsDragging(false);\n    setDragX(0);\n\n    try {\n      if (e.currentTarget.hasPointerCapture(e.pointerId)) {\n        e.currentTarget.releasePointerCapture(e.pointerId);\n      }\n    } catch {\n      // ignore\n    }\n  };\n\n  const commitJudge = (isKnown: boolean) => {\n    setExitDirection(isKnown ? 'right' : 'left');\n    setTimeout(() => onJudge(isKnown), 200);\n  };\n\n  const studyCountLabel = card.studyCount === 0 ? 'はじめての単語' : `${card.studyCount}回目`;\n  const headwordFontSize = getHeadwordFontSize(card.headword);\n\n  // 文字のぼやけ防止: 手前のカードのみ移動し、奥のカードは定位置で静止\n  const transform = isTop\n    ? exitDirection\n      ? `translateX(${exitDirection === 'right' ? 450 : -450}px) rotate(${exitDirection === 'right' ? 8 : -8}deg)`\n      : `translateX(${dragX}px) rotate(${dragX * 0.02}deg)`\n    : 'none';\n\n  return (\n    <div\n      ref={cardRef}\n      onPointerDown={handlePointerDown}\n      onPointerMove={handlePointerMove}\n      onPointerUp={handlePointerUp}\n      onPointerCancel={handlePointerCancel}\n      style={{\n        transform,\n        zIndex: 10 - stackOffset,\n        opacity: exitDirection ? 0 : 1,\n        backfaceVisibility: 'hidden',\n        WebkitBackfaceVisibility: 'hidden',\n      }}\n      className={`absolute inset-0 flex select-none flex-col justify-between rounded-3xl border border-line bg-white p-6 shadow-lg touch-none ${\n        !isRevealed && isTop ? 'cursor-pointer' : ''\n      } ${\n        isTop && !isDragging\n          ? 'transition-[transform,opacity] duration-200 motion-reduce:transition-none'\n          : 'transition-none'\n      }`}\n    >\n      {/* 1. 学習回数バッジ */}\n      <div className=\"flex justify-start\">\n        <span className=\"rounded-full border border-line bg-paper px-3 py-1 text-xs text-ink/60\">\n          {studyCountLabel}\n        </span>\n      </div>\n\n      {/* ドラッグ中のスタンプ表示（バッジと被らないよう top-16 へ配置） */}\n      {isTop && isRevealed && dragX !== 0 && (\n        <div\n          style={{ opacity: Math.min(Math.abs(dragX) / 100, 1) }}\n          className={`pointer-events-none absolute top-16 z-20 rounded-lg border-2 px-3 py-1 text-sm font-bold ${\n            dragX > 0 ? 'right-6 -rotate-12 border-ink text-ink' : 'left-6 rotate-12 border-ink/50 text-ink/50'\n          }`}\n        >\n          {dragX > 0 ? 'わかった' : 'わからなかった'}\n        </div>\n      )}\n\n      {/* 2. 単語本体（見切れ防止パディング + 発音記号クッキリ表示） */}\n      <div className=\"my-auto flex w-full flex-col items-center justify-center gap-1.5 py-2 text-center\">\n        <p\n          className={`w-full font-mincho font-bold text-ink tracking-tight whitespace-nowrap leading-normal py-2 ${headwordFontSize}`}\n        >\n          {card.headword}\n        </p>\n        {card.pronunciation ? (\n          <p className=\"font-maru text-lg sm:text-xl text-ink/75 tracking-wider\">\n            /{card.pronunciation}/\n          </p>\n        ) : (\n          <div className=\"h-7\" />\n        )}\n      </div>\n\n      {/* 3. 下部エリア（意味 + 判定ボタン） */}\n      <div className=\"flex flex-col gap-3\">\n        {/* 意味エリア + 赤シート */}\n        <div className=\"relative h-24 overflow-hidden rounded-2xl\">\n          <div className=\"flex h-full flex-col items-center justify-center rounded-2xl border border-line bg-paper p-3 text-center\">\n            <p className=\"font-maru text-base font-bold text-ink leading-snug\">{card.meaning}</p>\n            {card.exampleSentence && (\n              <p className=\"mt-1 font-maru text-xs text-ink/50 line-clamp-1\">{card.exampleSentence}</p>\n            )}\n          </div>\n\n          <div\n            style={{\n              transform: isRevealed ? 'translateX(105%) rotate(6deg)' : 'translateX(0)',\n            }}\n            className={`absolute inset-0 flex items-center justify-center rounded-2xl bg-akashiito text-sm font-bold text-paper shadow-inner transition-transform duration-300 ease-out motion-reduce:transition-none ${\n              isRevealed ? 'pointer-events-none' : ''\n            }`}\n          >\n            タップして確認\n          </div>\n        </div>\n\n        {/* 4. 判定ボタン（最初から領域を確保しレイアウトシフトを完全排除） */}\n        <div\n          className={`flex gap-3 transition-opacity duration-200 ${\n            isRevealed && isTop ? 'opacity-100' : 'opacity-0 pointer-events-none'\n          }`}\n        >\n          <button\n            type=\"button\"\n            data-action=\"judge\"\n            tabIndex={isRevealed && isTop ? 0 : -1}\n            onClick={(e) => {\n              e.stopPropagation();\n              commitJudge(false);\n            }}\n            className=\"min-h-[56px] flex-1 rounded-2xl border border-line bg-white font-medium text-ink/70 transition active:bg-paper\"\n          >\n            わからなかった\n          </button>\n          <button\n            type=\"button\"\n            data-action=\"judge\"\n            tabIndex={isRevealed && isTop ? 0 : -1}\n            onClick={(e) => {\n              e.stopPropagation();\n              commitJudge(true);\n            }}\n            className=\"min-h-[56px] flex-1 rounded-2xl bg-ink font-medium text-paper transition active:opacity-90\"\n          >\n            わかった\n          </button>\n        </div>\n      </div>\n    </div>\n  );\n}\n",
+  "components/review/WordJudgeCardScreen.tsx": "'use client';\n\nimport { useState } from 'react';\nimport { WordJudgeCard, type WordCardData } from './WordJudgeCard';\n\ninterface WordJudgeCardScreenProps {\n  cards: WordCardData[];\n  onJudge: (wordId: string, isKnown: boolean) => void;\n  onAllDone?: () => void;\n}\n\nconst MAX_STACK_VISIBLE = 3;\n\nexport function WordJudgeCardScreen({ cards, onJudge, onAllDone }: WordJudgeCardScreenProps) {\n  const [currentIndex, setCurrentIndex] = useState(0);\n  const total = cards.length;\n  const remaining = cards.slice(currentIndex, currentIndex + MAX_STACK_VISIBLE);\n\n  const handleJudge = (wordId: string, isKnown: boolean) => {\n    onJudge(wordId, isKnown);\n    const next = currentIndex + 1;\n    if (next >= total) {\n      onAllDone?.();\n    }\n    setCurrentIndex(next);\n  };\n\n  if (currentIndex >= total) {\n    return (\n      <div className=\"flex h-full flex-col items-center justify-center gap-2 p-6 text-center\">\n        <p className=\"font-mincho text-2xl font-bold text-ink\">おつかれさま!</p>\n        <p className=\"font-maru text-sm text-ink/60\">{total}語の判定が終わりました</p>\n      </div>\n    );\n  }\n\n  return (\n    <div className=\"flex h-full flex-col\">\n      {/* 上部プログレスバー */}\n      <div className=\"px-4 pb-2 pt-4\">\n        <div className=\"h-1.5 w-full overflow-hidden rounded-full bg-line/50\">\n          <div\n            className=\"h-full rounded-full bg-ink transition-[width] duration-300 motion-reduce:transition-none\"\n            style={{ width: `${(currentIndex / total) * 100}%` }}\n          />\n        </div>\n        <p className=\"mt-1 font-maru text-right text-xs text-ink/40\">\n          {currentIndex}/{total}\n        </p>\n      </div>\n\n      {/* カードスタック領域 */}\n      <div className=\"relative flex-1 px-4 pb-6 pt-2\">\n        {remaining.map((card, i) => (
+          <WordJudgeCard\n            key={card.wordId}\n            card={card}\n            isTop={i === 0}\n            stackOffset={i}\n            onJudge={(isKnown) => handleJudge(card.wordId, isKnown)}\n          />\n        ))}\n      </div>\n    </div>\n  );\n}\n",
+  "app/(main)/review-preview/page.tsx": "'use client';\n\nimport { WordJudgeCardScreen } from '@/components/review/WordJudgeCardScreen';\nimport type { WordCardData } from '@/components/review/WordJudgeCard';\n\nconst MOCK_CARDS: WordCardData[] = [\n  {\n    wordId: '1',\n    headword: 'cat',\n    pronunciation: 'kæt',\n    meaning: '猫',\n    exampleSentence: 'I have a cat.',\n    studyCount: 0,\n  },\n  {\n    wordId: '2',\n    headword: 'benefit',\n    pronunciation: 'ˈbenɪfɪt',\n    meaning: '利益、恩恵',\n    exampleSentence: 'It will benefit everyone.',\n    studyCount: 2,\n  },\n  {\n    wordId: '3',\n    headword: 'consequence',\n    pronunciation: 'ˈkɑːnsəkwens',\n    meaning: '結果、影響',\n    exampleSentence: 'Consider the consequences.',\n    studyCount: 5,\n  },\n  {\n    wordId: '4',\n    headword: 'characteristically',\n    pronunciation: 'ˌkærəktəˈrɪstɪkli',\n    meaning: '特徴的に、相変わらず',\n    studyCount: 1,\n  },\n  {\n    wordId: '5',\n    headword: 'abandon',\n    pronunciation: 'əˈbændən',\n    meaning: '〜を捨てる、放棄する',\n    exampleSentence: 'He abandoned the plan.',\n    studyCount: 3,\n  },\n  {\n    wordId: '6',\n    headword: 'diminish',\n    pronunciation: 'dɪˈmɪnɪʃ',\n    meaning: '減少する、弱める',\n    studyCount: 0,\n  },\n  {\n    wordId: '7',\n    headword: 'genuine',\n    pronunciation: 'ˈdʒenjuɪn',\n    meaning: '本物の、心からの',\n    studyCount: 4,\n  },\n  {\n    wordId: '8',\n    headword: 'fluctuate',\n    pronunciation: 'ˈflʌktʃueɪt',\n    meaning: '変動する',\n    studyCount: 1,\n  },\n  {\n    wordId: '9',\n    headword: 'illustrate',\n    pronunciation: 'ˈɪləstreɪt',\n    meaning: '説明する、示す',\n    studyCount: 2,\n  },\n  {\n    wordId: '10',\n    headword: 'justify',\n    pronunciation: 'ˈdʒʌstɪfaɪ',\n    meaning: '正当化する',\n    studyCount: 0,\n  },\n];\n\nexport default function ReviewPreviewPage() {\n  return (\n    <main className=\"mx-auto h-[100dvh] max-w-md bg-paper\">\n      <WordJudgeCardScreen\n        cards={MOCK_CARDS}\n        onJudge={(wordId, isKnown) => {\n          console.log('judged', wordId, isKnown);\n        }}\n        onAllDone={() => {\n          console.log('all done');\n        }}\n      />\n    </main>\n  );\n}\n",
+  "components/weakness/WeaknessChunkTile.tsx": "\"use client\";\n\nimport React from 'react';\nimport type { ChunkStat } from '@/lib/weakness/computeChunkStats';\n\ninterface WeaknessChunkTileProps {\n  chunk: ChunkStat;\n  onClick: (chunk: ChunkStat) => void;\n}\n\nfunction formatDateLabel(dateStr: string): string {\n  const [, m, d] = dateStr.split('-').map(Number);\n  return `${m}/${d}`;\n}\n\nexport const WeaknessChunkTile: React.FC<WeaknessChunkTileProps> = ({ chunk, onClick }) => {\n  const hasAttempts = chunk.totalAttempts > 0;\n  const mistakePct = Math.round(chunk.mistakeRate * 100);\n\n  // 4-5 配色設計: 既存トークンの濃淡だけで3段階を表現\n  let styleClass = 'border-line bg-paper text-ink';\n  let badgeText = '良好';\n  let badgeStyle = 'bg-line/30 text-ink/70 border-line/60';\n\n  if (!hasAttempts) {\n    styleClass = 'border-line/60 bg-white text-ink/40';\n    badgeText = '未実施';\n    badgeStyle = 'bg-line/20 text-ink/40 border-line/40';\n  } else if (chunk.mistakeRate >= 0.4) {\n    styleClass = 'border-akashiito-border bg-akashiito/15 text-ink shadow-xs';\n    badgeText = '要注意';\n    badgeStyle = 'bg-akashiito/20 text-akashiito border-akashiito/30 font-bold';\n  } else if (chunk.mistakeRate >= 0.15) {\n    styleClass = 'border-highlighter/60 bg-highlighter/20 text-ink';\n    badgeText = 'やや注意';\n    badgeStyle = 'bg-highlighter/40 text-ink border-highlighter/60 font-semibold';\n  }\n\n  return (\n    <button\n      type=\"button\"\n      onClick={() => onClick(chunk)}\n      className={`relative flex min-h-[120px] min-w-[130px] flex-col justify-between rounded-2xl border p-3.5 text-left transition-all duration-150 active:scale-[0.98] hover:shadow-xs cursor-pointer ${styleClass}`}\n    >\n      {/* needsAttention の場合の控えめな赤ドット */}\n      {chunk.needsAttention && (\n        <span className=\"absolute right-2.5 top-2.5 flex h-2 w-2\">\n          <span className=\"relative inline-flex h-2 w-2 rounded-full bg-akashiito\" />\n        </span>\n      )}\n\n      {/* 上部: 日付 & 状態バッジ */}\n      <div>\n        <div className=\"flex items-center justify-between\">\n          <span className=\"font-maru text-[11px] font-bold text-ink/60\">\n            {formatDateLabel(chunk.originDate)}\n          </span>\n          <span className={`rounded-full border px-1.5 py-0.5 text-[9px] ${badgeStyle}`}>\n            {badgeText}\n          </span>\n        </div>\n        <p className=\"mt-1.5 font-mincho text-sm font-bold tracking-tight text-ink\">\n          No.{chunk.rangeStart}〜{chunk.rangeEnd}\n        </p>\n      </div>\n\n      {/* 下部: ミス率 & テスト回数 */}\n      <div className=\"mt-3 flex items-end justify-between border-t border-line/40 pt-2\">\n        <div>\n          <span className=\"block font-maru text-[10px] text-ink/50\">ミス率</span>\n          <span className=\"font-mincho text-lg font-bold text-ink\">\n            {hasAttempts ? `${mistakePct}%` : '—'}\n          </span>\n        </div>\n        <span className=\"font-maru text-[10px] text-ink/50\">\n          {hasAttempts ? `${chunk.history.length}回テスト` : '未受検'}\n        </span>\n      </div>\n    </button>\n  );\n};\n",
+  "components/weakness/WeaknessBottomSheet.tsx": "\"use client\";\n\nimport React, { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';\nimport Link from 'next/link';\nimport type { ChunkStat } from '@/lib/weakness/computeChunkStats';\n\ninterface WeaknessBottomSheetProps {\n  chunk: ChunkStat | null;\n  onClose: () => void;\n}\n\nconst DRAG_CLOSE_THRESHOLD = 80;\n\nfunction formatDateLabel(dateStr: string): string {\n  const [, m, d] = dateStr.split('-').map(Number);\n  return `${m}/${d}`;\n}\n\nexport function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps) {\n  const [dragY, setDragY] = useState(0);\n  const dragStartY = useRef<number | null>(null);\n\n  const handlePointerDown = (e: ReactPointerEvent) => {\n    dragStartY.current = e.clientY;\n  };\n  const handlePointerMove = (e: ReactPointerEvent) => {\n    if (dragStartY.current === null) return;\n    const delta = e.clientY - dragStartY.current;\n    if (delta > 0) setDragY(delta);\n  };\n  const handlePointerUp = () => {\n    if (dragY > DRAG_CLOSE_THRESHOLD) {\n      onClose();\n    }\n    setDragY(0);\n    dragStartY.current = null;\n  };\n\n  if (!chunk) return null;\n\n  const hasAttempts = chunk.totalAttempts > 0;\n  const mistakePct = Math.round(chunk.mistakeRate * 100);\n\n  // 折れ線グラフ用座標計算\n  const chartWidth = 320;\n  const chartHeight = 70;\n  const paddingX = 35;\n  const paddingY = 16;\n\n  const historyPoints = chunk.history.map((h, i) => {\n    const x =\n      chunk.history.length === 1\n        ? chartWidth / 2\n        : paddingX + (i / (chunk.history.length - 1)) * (chartWidth - paddingX * 2);\n    const y = chartHeight - paddingY - h.mistakeRate * (chartHeight - paddingY * 2);\n    return {\n      x,\n      y,\n      rate: Math.round(h.mistakeRate * 100),\n      date: formatDateLabel(h.testDate),\n    };\n  });\n\n  const pathD =\n    historyPoints.length > 1\n      ? historyPoints.reduce(\n          (acc, p, idx) => `${acc} ${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`,\n          ''\n        )\n      : '';\n\n  return (\n    <div\n      className=\"fixed inset-0 z-50 flex items-end justify-center bg-ink/40 backdrop-blur-xs transition-opacity\"\n      onClick={onClose}\n    >\n      <div\n        onClick={(e) => e.stopPropagation()}\n        style={{ transform: `translateY(${dragY}px)` }}\n        className=\"max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-paper shadow-2xl transition-transform duration-200 motion-reduce:transition-none\"\n      >\n        {/* ドラッグハンドル & ヘッダー */}\n        <div\n          onPointerDown={handlePointerDown}\n          onPointerMove={handlePointerMove}\n          onPointerUp={handlePointerUp}\n          className=\"sticky top-0 z-10 flex touch-none flex-col items-center bg-paper/95 px-4 pb-2 pt-3 backdrop-blur-xs border-b border-line/40\"\n        >\n          <div className=\"h-1.5 w-12 rounded-full bg-line\" />\n          <div className=\"mt-2 flex w-full items-center justify-between\">\n            <div className=\"flex items-center gap-2\">\n              <h2 className=\"font-mincho text-lg font-bold text-ink\">\n                No.{chunk.rangeStart}〜{chunk.rangeEnd}\n              </h2>\n              <span className=\"font-maru text-xs text-ink/50\">\n                ({formatDateLabel(chunk.originDate)} 学習)\n              </span>\n            </div>\n            <button\n              type=\"button\"\n              onClick={onClose}\n              aria-label=\"閉じる\"\n              className=\"flex min-h-[40px] min-w-[40px] items-center justify-center font-bold text-ink/40 hover:text-ink cursor-pointer\"\n            >\n              ✕\n            </button>\n          </div>\n        </div>\n\n        <div className=\"space-y-5 p-4 pb-6\">\n          {/* サマリー統計 */}\n          <div className=\"grid grid-cols-2 gap-3\">\n            <div className=\"rounded-2xl border border-line bg-white p-3.5 shadow-xs\">\n              <span className=\"block font-maru text-[11px] text-ink/50\">現在のミス率</span>\n              <div className=\"mt-1 flex items-baseline gap-1\">\n                <span className=\"font-mincho text-2xl font-bold text-ink\">\n                  {hasAttempts ? `${mistakePct}%` : '—'}\n                </span>\n                {chunk.needsAttention && (\n                  <span className=\"rounded-full bg-akashiito/15 px-2 py-0.5 font-maru text-[10px] font-bold text-akashiito\">\n                    要注意\n                  </span>\n                )}\n              </div>\n            </div>\n            <div className=\"rounded-2xl border border-line bg-white p-3.5 shadow-xs\">\n              <span className=\"block font-maru text-[11px] text-ink/50\">テスト回数</span>\n              <p className=\"mt-1 font-mincho text-2xl font-bold text-ink\">\n                {chunk.history.length}{' '}\n                <span className=\"font-maru text-xs font-normal text-ink/50\">回</span>\n              </p>\n            </div>\n          </div>\n\n          {/* ミニ折れ線グラフ */}\n          <div className=\"rounded-2xl border border-line bg-white p-4 shadow-xs\">\n            <div className=\"mb-2 flex items-center justify-between\">\n              <span className=\"font-mincho text-xs font-bold text-ink/70\">ミス率の推移</span>\n              <span className=\"font-maru text-[10px] text-ink/40\">古い順 → 最新</span>\n            </div>\n\n            {chunk.history.length === 0 ? (\n              <p className=\"py-4 text-center font-maru text-xs text-ink/40\">\n                まだテスト履歴がありません\n              </p>\n            ) : (\n              <div className=\"py-1\">\n                <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className=\"h-20 w-full overflow-visible\">\n                  <line\n                    x1={paddingX}\n                    y1={chartHeight - paddingY}\n                    x2={chartWidth - paddingX}\n                    y2={chartHeight - paddingY}\n                    stroke=\"#EBE8DF\"\n                    strokeWidth=\"1\"\n                    strokeDasharray=\"3,3\"\n                  />\n                  <line\n                    x1={paddingX}\n                    y1={chartHeight / 2}\n                    x2={chartWidth - paddingX}\n                    y2={chartHeight / 2}\n                    stroke=\"#EBE8DF\"\n                    strokeWidth=\"1\"\n                    strokeDasharray=\"3,3\"\n                  />\n\n                  {pathD && (\n                    <path\n                      d={pathD}\n                      fill=\"none\"\n                      stroke=\"#232A3B\"\n                      strokeWidth=\"2.5\"\n                      strokeLinecap=\"round\"\n                      strokeLinejoin=\"round\"\n                    />\n                  )}\n\n                  {historyPoints.map((p, i) => (\n                    <g key={i}>\n                      <circle\n                        cx={p.x}\n                        cy={p.y}\n                        r=\"4\"\n                        fill=\"#232A3B\"\n                        stroke=\"#FFFFFF\"\n                        strokeWidth=\"2\"\n                      />\n                      <text\n                        x={p.x}\n                        y={p.y - 7}\n                        textAnchor=\"middle\"\n                        className=\"fill-ink text-[10px] font-bold font-number\"\n                      >\n                        {p.rate}%\n                      </text>\n                      <text\n                        x={p.x}\n                        y={chartHeight + 1}\n                        textAnchor=\"middle\"\n                        className=\"fill-ink/40 text-[9px] font-maru\"\n                      >\n                        {p.date}\n                      </text>\n                    </g>\n                  ))}\n                </svg>\n              </div>\n            )}\n          </div>\n\n          {/* 間違えた単語一覧 */}\n          <div className=\"space-y-2\">\n            <div className=\"flex items-center justify-between px-1\">\n              <span className=\"font-mincho text-xs font-bold text-ink/70\">\n                間違えた単語 ({chunk.mistakeWords.length}語)\n              </span>\n            </div>\n\n            {chunk.mistakeWords.length === 0 ? (\n              <div className=\"rounded-2xl border border-line/60 bg-white p-4 text-center\">\n                <p className=\"font-mincho text-sm font-bold text-ink/70\">間違えた単語はありません 🎉</p>\n                <p className=\"mt-1 font-maru text-xs text-ink/40\">この範囲はしっかり定着しています</p>\n              </div>\n            ) : (\n              <div className=\"max-h-[220px] space-y-2 overflow-y-auto pr-0.5\">\n                {chunk.mistakeWords.map((w) => (\n                  <div\n                    key={w.wordId}\n                    className=\"flex items-center justify-between rounded-xl border border-line bg-white p-3 shadow-xs\"\n                  >\n                    <div>\n                      <div className=\"flex items-baseline gap-2\">\n                        <span className=\"font-mincho text-base font-bold text-ink">{w.headword}</span>\n                        {w.pronunciation && (\n                          <span className=\"font-maru text-xs text-ink/40\">{w.pronunciation}</span>\n                        )}\n                      </div>\n                      <p className=\"mt-0.5 font-maru text-xs text-ink/70">{w.meaning}</p>\n                    </div>\n                    <span className=\"shrink-0 rounded-full border border-akashiito-border bg-akashiito/10 px-2 py-0.5 font-maru text-[10px] font-bold text-akashiito\">\n                      {w.wrongCount}回ミス\n                    </span>\n                  </div>\n                ))}\n              </div>\n            )}\n          </div>\n        </div>\n\n        {/* 下部アクションボタン */}\n        <div className=\"sticky bottom-0 border-t border-line/80 bg-paper/95 p-4 backdrop-blur-xs\">\n          <Link\n            href={`/test?mode=normal&originAssignmentId=${chunk.chunkId}`}\n            className=\"flex min-h-[50px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90\"\n          >
+            この範囲だけミニテストを行う\n          </Link>\n        </div>\n      </div>\n    </div>\n  );\n}\n",
+  "components/weakness/ChunkSummaryScreen.tsx": "\"use client\";\n\nimport React from 'react';\nimport Link from 'next/link';\n\nexport interface ChunkResultItem {\n  chunkId: string;\n  rangeStart: number;\n  rangeEnd: number;\n  originDate: string;\n  correctCount: number;\n  totalCount: number;\n  mistakeRate: number;\n  prevMistakeRate: number | null;\n  status: 'improved' | 'same' | 'worse' | 'first';\n}\n\ninterface ChunkSummaryScreenProps {\n  totalCorrect: number;\n  totalCount: number;\n  chunkResults: ChunkResultItem[];\n}\n\nfunction formatDateShort(dateStr: string): string {\n  const [, m, d] = dateStr.split('-').map(Number);\n  return `${m}/${d}`;\n}\n\nexport function ChunkSummaryScreen({\n  totalCorrect,\n  totalCount,\n  chunkResults,\n}: ChunkSummaryScreenProps) {\n  const overallAccuracy = totalCount > 0 ? Math.round((totalCorrect / totalCount) * 100) : 0;\n\n  return (\n    <div className=\"flex min-h-[100dvh] flex-col justify-between p-6 bg-paper\">\n      <div className=\"space-y-6\">\n        {/* ヘッダー・全体スコア */}\n        <div className=\"text-center pt-4\">\n          <span className=\"inline-block rounded-full bg-highlighter/40 px-3 py-1 font-maru text-xs font-bold text-ink mb-2\">\n            総復習テスト完了 🎉\n          </span>\n          <h1 className=\"font-mincho text-2xl font-bold text-ink\">今週の復習サマリー</h1>\n          <p className=\"mt-1 font-maru text-xs text-ink/60\">\n            各範囲の定着度を確認して、着実にステップアップしていきましょう\n          </p>\n\n          <div className=\"mt-5 rounded-3xl border border-line bg-white p-5 shadow-sm text-center\">\n            <span className=\"font-maru text-xs text-ink/50 block\">全体の正答率</span>\n            <div className=\"mt-1 flex items-baseline justify-center gap-1.5\">\n              <span className=\"font-mincho text-4xl font-bold tracking-tight text-ink\">\n                {overallAccuracy}%\n              </span>\n              <span className=\"font-maru text-xs font-bold text-ink/50\">\n                ({totalCorrect} / {totalCount}語)\n              </span>\n            </div>\n          </div>\n        </div>\n\n        {/* チャンク別目次リスト */}\n        <div className=\"space-y-2.5\">\n          <h2 className=\"font-mincho text-xs font-bold text-ink/60 px-1\">範囲ごとの定着状況</h2>\n          <div className=\"space-y-2\">\n            {chunkResults.map((chunk) => {\n              const accuracy =\n                chunk.totalCount > 0\n                  ? Math.round((chunk.correctCount / chunk.totalCount) * 100)\n                  : 0;\n\n              let badgeText = '初測定';\n              let badgeClass = 'bg-line/20 text-ink/60 border-line/40';\n\n              if (chunk.status === 'improved') {\n                badgeText = '定着向上 ↑';\n                badgeClass = 'bg-paper text-ink border-line font-bold';\n              } else if (chunk.status === 'same') {\n                badgeText = '維持 →';\n                badgeClass = 'bg-paper text-ink/60 border-line/60';\n              } else if (chunk.status === 'worse') {\n                badgeText = '要注意 ⚠️';\n                badgeClass = 'bg-akashiito/15 text-akashiito border-akashiito-border font-bold';\n              }\n\n              return (\n                <div\n                  key={chunk.chunkId}\n                  className={`flex items-center justify-between rounded-2xl border p-3.5 transition ${\n                    chunk.status === 'worse'\n                      ? 'border-akashiito-border/80 bg-akashiito/5'\n                      : 'border-line bg-white'\n                  }`}\n                >\n                  <div>\n                    <div className=\"flex items-center gap-2\">\n                      <span className=\"font-mincho text-sm font-bold text-ink\">\n                        No.{chunk.rangeStart}〜{chunk.rangeEnd}\n                      </span>\n                      <span className=\"font-maru text-[10px] text-ink/40\">\n                        ({formatDateShort(chunk.originDate)})\n                      </span>\n                    </div>\n                    <p className=\"mt-0.5 font-maru text-xs text-ink/60\">\n                      正解 {chunk.correctCount}/{chunk.totalCount}語 ({accuracy}%)\n                    </p>\n                  </div>\n\n                  <div className=\"text-right\">\n                    <span className={`inline-block rounded-full border px-2.5 py-1 text-xs ${badgeClass}`}>\n                      {badgeText}\n                    </span>\n                    {chunk.prevMistakeRate !== null && (\n                      <span className=\"block mt-0.5 font-maru text-[10px] text-ink/40\">\n                        前回ミス率 {Math.round(chunk.prevMistakeRate * 100)}%\n                      </span>\n                    )}\n                  </div>\n                </div>\n              );\n            })}\n          </div>\n        </div>\n      </div>\n\n      {/* フッターアクション */}\n      <div className=\"pt-6 pb-2\">\n        <Link\n          href=\"/dashboard\"\n          className=\"flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90\"\n        >\n          ダッシュボードへ戻る\n        </Link>\n      </div>\n    </div>\n  );\n}\n",
+  "components/weakness/WeaknessMapClient.tsx": "\"use client\";\n\nimport React, { useState } from 'react';\nimport Link from 'next/link';\nimport { ChevronLeft } from 'lucide-react';\nimport type { ChunkStat } from '@/lib/weakness/computeChunkStats';\nimport { WeaknessChunkTile } from './WeaknessChunkTile';\nimport { WeaknessBottomSheet } from './WeaknessBottomSheet';\n\ninterface WeaknessMapClientProps {\n  chunks: ChunkStat[];\n  wordbookName: string;\n}\n\nexport function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientProps) {\n  const [selectedChunk, setSelectedChunk] = useState<ChunkStat | null>(null);\n\n  const totalChunks = chunks.length;\n  const attentionCount = chunks.filter((c) => c.needsAttention).length;\n  const totalMistakes = chunks.reduce((acc, c) => acc + c.mistakeWords.length, 0);\n\n  return (\n    <div className=\"space-y-6\">\n      {/* ナビゲーション & ヘッダー */}\n      <div>\n        <Link\n          href=\"/dashboard\"\n          className=\"inline-flex items-center text-xs font-semibold text-ink-muted hover:text-ink transition-colors\"\n        >\n          <ChevronLeft className=\"h-4 w-4 mr-0.5\" />\n          ダッシュボードへ戻る\n        </Link>\n\n        <div className=\"mt-4 flex items-center justify-between\">\n          <div>\n            <h1 className=\"font-mincho text-2xl font-bold text-ink\">弱点マップ</h1>\n            <p className=\"font-maru text-xs text-ink/50 mt-0.5\">\n              {wordbookName || '単語帳'} の進度と定着傾向\n            </p>\n          </div>\n        </div>\n      </div>\n\n      {/* サマリー概要 */}\n      <div className=\"grid grid-cols-3 gap-2\">\n        <div className=\"rounded-2xl border border-line bg-white p-3 text-center shadow-xs\">\n          <span className=\"block font-maru text-[10px] text-ink/50\">総学習範囲</span>\n          <span className=\"font-mincho text-xl font-bold text-ink\">{totalChunks}</span>\n          <span className=\"font-maru text-[10px] text-ink/40 ml-0.5\">チャンク</span>\n        </div>\n        <div className=\"rounded-2xl border border-line bg-white p-3 text-center shadow-xs\">\n          <span className=\"block font-maru text-[10px] text-ink/50\">要注意範囲</span>\n          <span className={`font-mincho text-xl font-bold ${attentionCount > 0 ? 'text-akashiito' : 'text-ink'}`}>\n            {attentionCount}\n          </span>\n          <span className=\"font-maru text-[10px] text-ink/40 ml-0.5\">箇所</span>\n        </div>\n        <div className=\"rounded-2xl border border-line bg-white p-3 text-center shadow-xs\">\n          <span className=\"block font-maru text-[10px] text-ink/50\">苦手単語数</span>\n          <span className=\"font-mincho text-xl font-bold text-ink\">{totalMistakes}</span>\n          <span className=\"font-maru text-[10px] text-ink/40 ml-0.5\">語</span>\n        </div>\n      </div>\n\n      {/* チャンクタイル一覧 */}\n      <section className=\"space-y-2\">\n        <div className=\"flex items-center justify-between px-1\">\n          <h2 className=\"font-mincho text-xs font-bold text-ink/60\">学習範囲タイル一覧</h2>\n          <span className=\"font-maru text-[10px] text-ink/40\">タップして詳細・単語を確認</span>\n        </div>\n\n        {chunks.length === 0 ? (\n          <div className=\"rounded-3xl border border-line bg-white p-8 text-center shadow-xs\">\n            <p className=\"font-mincho text-base font-bold text-ink/70\">まだ学習記録がありません</p>\n            <p className=\"mt-1 font-maru text-xs text-ink/40\">\n              デイリーテストを進めると、ここに弱点分析が表示されます\n            </p>\n          </div>\n        ) : (\n          <div className=\"grid grid-cols-2 sm:grid-cols-3 gap-2.5\">\n            {chunks.map((chunk) => (\n              <WeaknessChunkTile\n                key={chunk.chunkId}\n                chunk={chunk}\n                onClick={setSelectedChunk}\n              />\n            ))}\n          </div>\n        )}\n      </section>\n\n      {/* 全体の苦手克服テスト CTA */}\n      <div className=\"pt-2\">\n        <Link\n          href=\"/test?mode=normal&weak=true\"\n          className=\"flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90\"\n        >\n          単語帳全体の苦手克服テストを始める\n        </Link>\n      </div>\n\n      {/* ボトムシート */}\n      <WeaknessBottomSheet\n        chunk={selectedChunk}\n        onClose={() => setSelectedChunk(null)}\n      />\n    </div>\n  );\n}\n",
+  "components/test/TestSessionRunner.tsx": "\"use client\";\n\nimport { useState } from 'react';\nimport { useRouter } from 'next/navigation';\nimport { WordJudgeCardScreen } from '@/components/review/WordJudgeCardScreen';\nimport type { WordCardData } from '@/components/review/WordJudgeCard';\nimport { ChunkSummaryScreen, type ChunkResultItem } from '@/components/weakness/ChunkSummaryScreen';\nimport type { ReviewChunkSummaryInfo } from '@/lib/test/getTodayTestWords';\n\ninterface TestSessionRunnerProps {\n  cards: WordCardData[];\n  dailyAssignmentId: string | null;\n  sessionType: 'daily_check' | 'normal';\n  isReviewDay?: boolean;\n  reviewChunks?: ReviewChunkSummaryInfo[];\n}\n\nexport function TestSessionRunner({\n  cards,\n  dailyAssignmentId,\n  sessionType,\n  isReviewDay = false,\n  reviewChunks = [],\n}: TestSessionRunnerProps) {\n  const router = useRouter();\n  const [answers, setAnswers] = useState<Map<string, boolean>>(new Map());\n  const [isSubmitting, setIsSubmitting] = useState(false);\n  const [summaryData, setSummaryData] = useState<{\n    totalCorrect: number;\n    totalCount: number;\n    chunkResults: ChunkResultItem[];\n  } | null>(null);\n\n  const handleJudge = (wordId: string, isKnown: boolean) => {\n    setAnswers((prev) => new Map(prev).set(wordId, isKnown));\n  };\n\n  const handleAllDone = async () => {\n    if (isSubmitting) return;\n    setIsSubmitting(true);\n\n    const results = cards.map((c) => ({\n      wordId: c.wordId,\n      isKnown: answers.get(c.wordId) ?? false,\n      originDailyAssignmentId: c.originDailyAssignmentId,\n    }));\n\n    try {\n      const res = await fetch('/api/test-sessions/complete', {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({\n          dailyAssignmentId,\n          type: sessionType,\n          results,\n        }),\n      });\n\n      if (!res.ok) {\n        console.error('Failed to save test session');\n      }\n\n      // 復習日のテストだった場合は中間サマリー画面を表示\n      if (isReviewDay && reviewChunks.length > 0) {\n        const correctCount = results.filter((r) => r.isKnown).length;\n        const totalCount = results.length;\n\n        const chunkResults: ChunkResultItem[] = reviewChunks.map((rc) => {\n          const chunkCards = cards.filter(\n            (c) =>\n              c.originDailyAssignmentId === rc.chunkId ||\n              (typeof c.number === 'number' &&\n                c.number >= rc.rangeStart &&\n                c.number <= rc.rangeEnd)\n          );\n          const cTotal = chunkCards.length;\n          const cCorrect = chunkCards.filter((c) => answers.get(c.wordId) ?? false).length;\n          const cMistakes = cTotal - cCorrect;\n          const cMistakeRate = cTotal > 0 ? Math.round((cMistakes / cTotal) * 100) / 100 : 0;\n\n          let status: 'improved' | 'same' | 'worse' | 'first' = 'first';\n          if (rc.prevMistakeRate !== null) {\n            const diff = cMistakeRate - rc.prevMistakeRate;\n            if (diff <= -0.1) {\n              status = 'improved';\n            } else if (diff >= 0.1) {\n              status = 'worse';\n            } else {\n              status = 'same';\n            }\n          }\n\n          return {\n            chunkId: rc.chunkId,\n            rangeStart: rc.rangeStart,\n            rangeEnd: rc.rangeEnd,\n            originDate: rc.originDate,\n            correctCount: cCorrect,\n            totalCount: cTotal,\n            mistakeRate: cMistakeRate,\n            prevMistakeRate: rc.prevMistakeRate,\n            status,\n          };\n        });\n\n        setSummaryData({
+          totalCorrect: correctCount,
+          totalCount,
+          chunkResults,
+        });
+        return;
       }
-
-      if (onSaved) onSaved();
-      onClose();
-    } catch (err: any) {
-      console.error("Weekly range save error:", err);
-      alert(err.message || "週間範囲の保存に失敗しました。再度お試しください。");
+    } catch (err) {
+      console.error('Error submitting test session', err);
     } finally {
-      setIsSubmitting(false);
+      if (!isReviewDay || reviewChunks.length === 0) {
+        router.push('/dashboard');
+        router.refresh();
+      }
     }
   };
 
-  return (
-    // z-[60] で BottomNav (z-40) の最前面に確実にオーバーレイを展開
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
-      {/* 背景オーバーレイ */}
-      <div
-        className="fixed inset-0 bg-ink/40 backdrop-blur-[2px] transition-opacity"
-        onClick={onClose}
-      />
-
-      {/* モーダル本体（画面高さを超えないようスクロールコンテナ化） */}
-      <div className="relative w-full max-w-lg bg-paper rounded-t-2xl sm:rounded-2xl border border-line shadow-2xl z-10 max-h-[85vh] sm:max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-200">
-        {/* ドラッグインジケータ / ヘッダー */}
-        <div className="pt-3 pb-2 px-6 flex flex-col items-center border-b border-line/60 flex-shrink-0">
-          <div className="w-12 h-1 bg-ink/20 rounded-full mb-3 sm:hidden" />
-          <div className="w-full flex items-center justify-between">
-            <div>
-              <span className="text-[10px] text-ink/50 font-mono tracking-wider">WEEKLY GOAL</span>
-              <h2 className="font-mincho text-lg font-bold text-ink">今週の学習範囲を設定</h2>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-ink/40 hover:text-ink p-1.5 text-base transition-colors"
-              aria-label="閉じる"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-
-        {/* スクロール可能なフォーム領域 */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
-          {/* 単語範囲入力 */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-ink/70">単語の範囲（No.）</label>
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <span className="text-[10px] text-ink/40 mb-1 block">開始</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={startNum}
-                  onChange={(e) => setStartNum(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-full px-3 py-2 border border-line rounded-lg bg-paper text-ink font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ink"
-                />
-              </div>
-              <span className="text-ink/40 pt-4">〜</span>
-              <div className="flex-1">
-                <span className="text-[10px] text-ink/40 mb-1 block">終了</span>
-                <input
-                  type="number"
-                  min={startNum}
-                  value={endNum}
-                  onChange={(e) => setEndNum(Math.max(startNum, parseInt(e.target.value) || startNum))}
-                  className="w-full px-3 py-2 border border-line rounded-lg bg-paper text-ink font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ink"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* 1日の単語数 */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-ink/70">1日の進める単語数</label>
-            <div className="grid grid-cols-4 gap-2">
-              {[10, 15, 20, 30].map((num) => (
-                <button
-                  key={num}
-                  type="button"
-                  onClick={() => setWordsPerDay(num)}
-                  className={\`py-2 text-xs font-mono rounded-lg border transition-all \${
-                    wordsPerDay === num
-                      ? "bg-ink text-paper border-ink font-bold"
-                      : "bg-paper text-ink border-line hover:bg-highlighter/10"
-                  }\`}
-                >
-                  {num}語
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* プレビュー表示パネル */}
-          <div className="pt-1">
-            <WeeklyPreviewPanel
-              days={preview?.days || []}
-              dailyAssignments={preview?.dailyAssignments || []}
-            />
-          </div>
-        </div>
-
-        {/* 下部固定アクションフッター（BottomNavに被らない安全配置） */}
-        <div className="p-4 border-t border-line bg-paper/95 rounded-b-2xl flex-shrink-0">
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSubmitting || startNum > endNum}
-            className="w-full py-3 bg-ink text-paper rounded-xl font-medium text-sm hover:opacity-90 active:scale-[0.99] disabled:opacity-40 transition-all shadow-sm"
-          >
-            {isSubmitting ? "保存中..." : "この範囲で決定する"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-`,
-
-  // 2. プレビューパネル (型安全性・空配列ハンドリングの堅牢化)
-  "components/weekly-range/WeeklyPreviewPanel.tsx": `"use client";
-
-interface DayAssignmentPreview {
-  date: string;
-  dayOfWeek: string;
-  rangeStart: number | null;
-  rangeEnd: number | null;
-  isReviewDay: boolean;
-}
-
-interface WeeklyPreviewPanelProps {
-  days: string[];
-  dailyAssignments: DayAssignmentPreview[];
-}
-
-export function WeeklyPreviewPanel({
-  days = [],
-  dailyAssignments = [],
-}: WeeklyPreviewPanelProps) {
-  if (!dailyAssignments || dailyAssignments.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="p-3.5 bg-paper rounded-xl border border-line space-y-2">
-      <div className="text-xs font-medium text-ink/70 mb-1">
-        1週間の学習プラン（プレビュー）
-      </div>
-      <div className="space-y-1.5 max-h-36 overflow-y-auto">
-        {dailyAssignments.map((item, index) => {
-          const dateLabel = item.date ? item.date.slice(5).replace("-", "/") : "";
-          const dayName = item.dayOfWeek || (days[index] ? days[index].slice(5) : \`Day \${index + 1}\`);
-
-          return (
-            <div
-              key={index}
-              className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-paper/70 border border-line/40 font-mono"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-ink/50 w-10 text-[11px]">{dateLabel}</span>
-                <span className="font-medium text-ink">{dayName}</span>
-              </div>
-              <div>
-                {item.isReviewDay ? (
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-highlighter/30 text-ink">
-                    復習日
-                  </span>
-                ) : (
-                  <span className="text-ink font-semibold">
-                    No. {item.rangeStart} - {item.rangeEnd}
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-`,
-
-  // 3. ボトムナビゲーション (z-index を z-40 に統一)
-  "components/layout/BottomNav.tsx": `"use client";
-
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-
-export function BottomNav() {
-  const pathname = usePathname();
-
-  // /test 画面ではナビを非表示
-  if (pathname?.startsWith("/test")) {
-    return null;
-  }
-
-  const navItems = [
-    { label: "ホーム", href: "/dashboard", icon: "🏠" },
-    { label: "グループ", href: "/group", icon: "👥" },
-  ];
-
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-paper/95 border-t border-line backdrop-blur-sm">
-      <div className="max-w-lg mx-auto flex items-center justify-around h-16 px-4">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={\`flex flex-col items-center justify-center flex-1 py-1 transition-colors \${
-                isActive ? "text-ink font-bold" : "text-ink/40 hover:text-ink/70"
-              }\`}
-            >
-              <span className="text-base mb-0.5">{item.icon}</span>
-              <span className="text-[11px] tracking-tight">{item.label}</span>
-            </Link>
-          );
-        })}
-      </div>
-    </nav>
-  );
-}
-`,
-
-  // 4. ダッシュボードの SetRangeCTA (モーダル接続の堅牢化)
-  "components/dashboard/SetRangeCTA.tsx": `"use client";
-
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { WeeklyRangeModal } from "@/components/weekly-range/WeeklyRangeModal";
-
-interface SetRangeCTAProps {
-  userId: string;
-  wordbookId?: string;
-  weekStartStr: string;
-}
-
-export function SetRangeCTA({
-  userId,
-  wordbookId,
-  weekStartStr,
-}: SetRangeCTAProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const router = useRouter();
-
-  if (!wordbookId) {
+  if (summaryData) {
     return (
-      <div className="p-6 border border-line rounded-2xl bg-paper text-center space-y-2">
-        <p className="text-sm text-ink/60">単語帳が選択されていません。</p>
-      </div>
+      <ChunkSummaryScreen
+        totalCorrect={summaryData.totalCorrect}
+        totalCount={summaryData.totalCount}
+        chunkResults={summaryData.chunkResults}
+      />
     );
   }
 
   return (
-    <>
-      <div className="p-6 border border-line rounded-2xl bg-paper shadow-sm space-y-4">
-        <div className="space-y-1">
-          <span className="text-xs text-ink/60 font-mono">今週の学習プラン</span>
-          <h2 className="font-mincho text-lg font-bold text-ink">
-            今週の単語学習範囲を設定しましょう
-          </h2>
-          <p className="text-xs text-ink/60 leading-relaxed">
-            土曜日から始まる1週間の目標範囲を決めることで、毎日の確認テストが自動でスケジュールされます。
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setIsOpen(true)}
-          className="w-full py-3.5 bg-ink text-paper rounded-xl font-medium text-sm hover:opacity-90 active:scale-[0.99] transition-all shadow-sm"
-        >
-          今週の範囲を設定する
-        </button>
-      </div>
-
-      <WeeklyRangeModal
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-        userId={userId}
-        wordbookId={wordbookId}
-        weekStartStr={weekStartStr}
-        onSaved={() => {
-          router.refresh();
-        }}
-      />
-    </>
+    <WordJudgeCardScreen
+      cards={cards}
+      onJudge={handleJudge}
+      onAllDone={handleAllDone}
+    />
   );
 }
 `,
-
-  // 5. 週間範囲保存 API (NextRequest / NextResponse / next/server 仕様準拠)
-  "app/api/weekly-ranges/route.ts": `import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { calculateWeeklyPreview } from "@/lib/assignment/calculateWeeklyPreview";
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const {
-      userId,
-      wordbookId,
-      weekStartDate,
-      rangeStart,
-      rangeEnd,
-      wordsPerDay,
-      pace,
-    } = body;
-
-    if (!userId || !wordbookId || !weekStartDate || !rangeStart || !rangeEnd) {
-      return NextResponse.json(
-        { error: "必須項目が不足しています" },
-        { status: 400 }
-      );
-    }
-
-    const supabase = await createClient();
-
-    // 1. weekly_ranges の保存・更新
-    const { data: rangeData, error: rangeError } = await supabase
-      .from("weekly_ranges")
-      .upsert(
-        {
-          user_id: userId,
-          wordbook_id: wordbookId,
-          week_start_date: weekStartDate,
-          range_start: rangeStart,
-          range_end: rangeEnd,
-        },
-        { onConflict: "user_id,week_start_date" }
-      )
-      .select()
-      .single();
-
-    if (rangeError) {
-      console.error("Failed to upsert weekly_range:", rangeError);
-      return NextResponse.json(
-        { error: "週間範囲の保存に失敗しました" },
-        { status: 500 }
-      );
-    }
-
-    // 2. 7日間の日次割当（daily_assignments）を計算して一括作成/更新
-    const preview = calculateWeeklyPreview({
-      rangeStart,
-      rangeEnd,
-      wordsPerDay: wordsPerDay || 20,
-      pace: pace || "standard",
-      weekStartDateSaturday: weekStartDate,
-    });
-
-    const dailyRows = preview.dailyAssignments.map((item) => ({
-      user_id: userId,
-      wordbook_id: wordbookId,
-      date: item.date,
-      range_start: item.rangeStart,
-      range_end: item.rangeEnd,
-      is_review_day: item.isReviewDay,
-    }));
-
-    // 既存の同週割当を更新
-    const { error: assignError } = await supabase
-      .from("daily_assignments")
-      .upsert(dailyRows, { onConflict: "user_id,date" });
-
-    if (assignError) {
-      console.error("Failed to upsert daily_assignments:", assignError);
-      return NextResponse.json(
-        { error: "日次割当の作成に失敗しました" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true, range: rangeData });
-  } catch (error: any) {
-    console.error("POST /api/weekly-ranges exception:", error);
-    return NextResponse.json(
-      { error: error.message || "予期しないエラーが発生しました" },
-      { status: 500 }
-    );
-  }
-}
-`,
+  "app/(main)/weakness/page.tsx": "import { redirect } from 'next/navigation';\nimport { createClient } from '@/lib/supabase/server';\nimport { computeChunkStats } from '@/lib/weakness/computeChunkStats';\nimport { WeaknessMapClient } from '@/components/weakness/WeaknessMapClient';\n\nexport default async function WeaknessPage() {\n  const supabase = await createClient();\n  const {\n    data: { user },\n  } = await supabase.auth.getUser();\n\n  if (!user) {\n    redirect('/login');\n  }\n\n  const { data: profile } = await supabase\n    .from('users')\n    .select('wordbook_id, wordbooks(name)')\n    .eq('id', user.id)\n    .single();\n\n  if (!profile?.wordbook_id) {\n    redirect('/dashboard');\n  }\n\n  const wordbookName = (profile.wordbooks as { name?: string } | null)?.name ?? '';\n  const chunks = await computeChunkStats(supabase, user.id, profile.wordbook_id);\n\n  return (\n    <main className=\"mx-auto max-w-md w-full px-4 pb-24 pt-6\">\n      <WeaknessMapClient chunks={chunks} wordbookName={wordbookName} />\n    </main>\n  );\n}\n",
+  "app/(main)/test/page.tsx": "import { redirect } from 'next/navigation';\nimport Link from 'next/link';\nimport { createClient } from '@/lib/supabase/server';\nimport { getTodayJST } from '@/lib/assignment/weekDates';\nimport { getTodayTestContext } from '@/lib/test/getTodayTestWords';\nimport { getWeakWords } from '@/lib/weakness/getWeakWords';\nimport { TestSessionRunner } from '@/components/test/TestSessionRunner';\n\ninterface TestPageProps {\n  searchParams: Promise<{ mode?: string; originAssignmentId?: string; weak?: string }>;\n}\n\nexport default async function TestPage({ searchParams }: TestPageProps) {\n  const params = await searchParams;\n  const sessionType = params.mode === 'normal' ? 'normal' : 'daily_check';\n\n  const supabase = await createClient();\n  const {\n    data: { user },\n  } = await supabase.auth.getUser();\n  if (!user) redirect('/login');\n\n  const { data: profile } = await supabase\n    .from('users')\n    .select('wordbook_id')\n    .eq('id', user.id)\n    .single();\n\n  if (!profile?.wordbook_id) {\n    redirect('/dashboard');\n  }\n\n  // 1. チャンク指定の苦手克服テスト\n  if (params.originAssignmentId) {\n    const weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {\n      chunkId: params.originAssignmentId,\n    });\n\n    if (weakCards.length === 0) {\n      return (\n        <main className=\"mx-auto flex h-[80vh] max-w-md flex-col items-center justify-center gap-4 px-4 text-center\">\n          <p className=\"font-mincho text-lg text-ink\">この範囲に苦手な単語はありません！</p>\n          <p className=\"font-maru text-xs text-ink/60\">しっかり定着しています。次の学習に進みましょう。</p>\n          <Link\n            href=\"/weakness\"\n            className=\"rounded-xl border border-line bg-white px-4 py-2 text-xs text-ink shadow-sm\"\n          >\n            弱点マップへ戻る\n          </Link>\n        </main>\n      );\n    }\n\n    return (\n      <main className=\"mx-auto h-[100dvh] max-w-md bg-paper\">\n        <TestSessionRunner\n          cards={weakCards}\n          dailyAssignmentId={params.originAssignmentId}\n          sessionType=\"normal\"\n          isReviewDay={false}\n        />\n      </main>\n    );\n  }\n\n  // 2. 単語帳全体の苦手克服テスト\n  if (params.weak === 'true') {\n    const weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id);\n\n    if (weakCards.length === 0) {\n      return (\n        <main className=\"mx-auto flex h-[80vh] max-w-md flex-col items-center justify-center gap-4 px-4 text-center\">\n          <p className=\"font-mincho text-lg text-ink\">現在、苦手な単語はありません！</p>\n          <p className=\"font-maru text-xs text-ink/60\">日々の学習が成果に繋がっています。</p>\n          <Link\n            href=\"/dashboard\"\n            className=\"rounded-xl border border-line bg-white px-4 py-2 text-xs text-ink shadow-sm\"\n          >\n            ダッシュボードへ戻る\n          </Link>\n        </main>\n      );\n    }\n\n    return (\n      <main className=\"mx-auto h-[100dvh] max-w-md bg-paper\">\n        <TestSessionRunner\n          cards={weakCards}\n          dailyAssignmentId={null}\n          sessionType=\"normal\"\n          isReviewDay={false}\n        />\n      </main>\n    );\n  }\n\n  // 3. 通常のデイリーテスト\n  const today = getTodayJST();\n  const context = await getTodayTestContext(supabase, user.id, today);\n\n  if (!context || context.cards.length === 0) {\n    return (\n      <main className=\"mx-auto flex h-[80vh] max-w-md flex-col items-center justify-center gap-4 px-4 text-center\">\n        <p className=\"font-mincho text-lg text-ink\">今日のテストはありません</p>\n        <p className=\"font-maru text-xs text-ink/60\">範囲が未設定か、今日はお休みです</p>\n        <Link\n          href=\"/dashboard\"\n          className=\"rounded-xl border border-line bg-white px-4 py-2 text-xs text-ink shadow-sm\"\n        >\n          ホームへ戻る\n        </Link>\n      </main>\n    );\n  }\n\n  return (\n    <main className=\"mx-auto h-[100dvh] max-w-md bg-paper\">\n      <TestSessionRunner\n        cards={context.cards}\n        dailyAssignmentId={context.dailyAssignmentId}\n        sessionType={sessionType}\n        isReviewDay={context.isReviewDay}\n        reviewChunks={context.reviewChunks}\n      />\n    </main>\n  );\n}\n",
+  "app/(main)/dashboard/page.tsx": "import Link from 'next/link';\nimport { createClient } from '@/lib/supabase/server';\nimport {\n  getTodayJST,\n  getThisWeekSaturdayJST,\n  getPreviousSaturday,\n  getWeekDates,\n} from '@/lib/assignment/weekDates';\nimport { TodayRangeCard } from '@/components/dashboard/TodayRangeCard';\nimport { WeeklySchedule } from '@/components/dashboard/WeeklySchedule';\nimport { SetRangeCTA } from '@/components/dashboard/SetRangeCTA';\nimport type { CycleType, DayType } from '@/lib/assignment/cycleTypes';\nimport type { LastWeekData } from '@/components/weekly-range/CycleSettingsPanel';\n\nexport default async function DashboardPage() {\n  const supabase = await createClient();\n  const {\n    data: { user },\n  } = await supabase.auth.getUser();\n\n  if (!user) return null;\n\n  const { data: profile } = await supabase\n    .from('users')\n    .select('wordbook_id, wordbooks(name, total_words)')\n    .eq('id', user.id)\n    .single();\n\n  const today = getTodayJST();\n  const weekStartDate = getThisWeekSaturdayJST(); // 土曜起点\n  const prevWeekStartDate = getPreviousSaturday(weekStartDate);\n  const weekDates = getWeekDates(weekStartDate);\n\n  // 1. 今週の週間範囲\n  const { data: weeklyRange } = await supabase\n    .from('weekly_ranges')\n    .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')\n    .eq('user_id', user.id)\n    .eq('week_start_date', weekStartDate)\n    .maybeSingle();\n\n  // 2. 先週の週間範囲\n  const { data: prevWeeklyRange } = await supabase\n    .from('weekly_ranges')\n    .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')\n    .eq('user_id', user.id)\n    .eq('week_start_date', prevWeekStartDate)\n    .maybeSingle();\n\n  const lastWeekData: LastWeekData | undefined = prevWeeklyRange\n    ? {\n        rangeStart: prevWeeklyRange.range_start,\n        rangeEnd: prevWeeklyRange.range_end,\n        perDayCount:\n          prevWeeklyRange.per_day_count ??\n          Math.max(1, Math.round((prevWeeklyRange.range_end - prevWeeklyRange.range_start + 1) / 5)),\n        cycleType: (prevWeeklyRange.cycle_type as CycleType) ?? 'five_two',\n        customDayTypes: (prevWeeklyRange.custom_day_types as DayType[]) ?? undefined,\n      }\n    : undefined;\n\n  // 3. 今週の日次割当\n  const { data: assignments } = await supabase\n    .from('daily_assignments')\n    .select('date, range_start, range_end, is_review_day')\n    .eq('user_id', user.id)\n    .in('date', weekDates);\n\n  const assignmentByDate = new Map((assignments ?? []).map((a) => [a.date, a]));\n\n  const weekDays = weekDates.map((date) => {\n    const a = assignmentByDate.get(date);\n    return {\n      date,\n      rangeStart: a?.range_start ?? null,\n      rangeEnd: a?.range_end ?? null,\n      isReviewDay: a?.is_review_day ?? false,\n    };\n  });\n\n  const todayAssignment = assignmentByDate.get(today);\n\n  const wordbookData = profile?.wordbooks as { name?: string; total_words?: number } | null;\n  const wordbookName = wordbookData?.name ?? '';\n  const wordbookTotalWords = wordbookData?.total_words ?? 0;\n\n  return (\n    <main className=\"mx-auto max-w-md space-y-6 px-4 pb-24 pt-6\">\n      {/* 上部ヘッダー */}\n      <header className=\"flex items-center justify-between px-1\">\n        <div>\n          <h1 className=\"font-mincho text-2xl font-bold text-ink\">単語帳</h1>\n          <p className=\"font-maru text-xs text-ink/50\">毎日コツコツ、記憶を定着</p>\n        </div>\n        <div className=\"flex items-center gap-1.5 rounded-full border border-akashiito/30 bg-akashiito/10 px-3 py-1 font-maru text-xs font-bold text-akashiito\">\n          <span>🔥</span>\n          <span>7日連続</span>\n        </div>\n      </header>\n\n      {/* 週間目標設定CTA */}\n      <SetRangeCTA\n        wordbookId={profile?.wordbook_id ?? ''}\n        wordbookTotalWords={wordbookTotalWords}\n        weekStartDate={weekStartDate}\n        hasExistingRange={!!weeklyRange}\n        initialCycleType={weeklyRange?.cycle_type as CycleType}\n        initialCustomDayTypes={weeklyRange?.custom_day_types as DayType[]}\n        initialRangeStart={weeklyRange?.range_start}\n        initialPerDayCount={weeklyRange?.per_day_count}\n        lastWeek={lastWeekData}\n      />\n\n      {/* 今日の学習カード */}\n      <TodayRangeCard\n        rangeStart={todayAssignment?.range_start ?? null}\n        rangeEnd={todayAssignment?.range_end ?? null}\n        isReviewDay={todayAssignment?.is_review_day ?? false}\n        wordbookName={wordbookName}\n      />\n\n      {/* 週間スケジュール */}\n      <section className=\"space-y-2\">\n        <div className=\"flex items-center justify-between px-1\">\n          <h2 className=\"font-mincho text-xs font-bold text-ink/60\">今週のスケジュール (土〜金)</h2>\n          <Link\n            href=\"/weakness\"\n            className=\"flex items-center gap-1 font-maru text-xs text-ink/60 transition hover:text-ink underline decoration-line underline-offset-4\"\n          >
+            <span>弱点マップを見る</span>\n            <span>→</span>\n          </Link>\n        </div>\n        <WeeklySchedule days={weekDays} todayDate={today} />\n      </section>\n    </main>\n  );\n}\n"
 };
 
-function main() {
-  console.log("=== Fixing Weekly Range & Navigation Bar Conflict ===");
-  for (const [filePath, content] of Object.entries(files)) {
-    const fullPath = path.join(process.cwd(), filePath);
-    const dir = path.dirname(fullPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(fullPath, content.trim() + "\n", "utf8");
-    console.log(`[Fixed/Updated] ${filePath}`);
-  }
-  console.log("=== Fix Complete! Successfully resolved layout conflict. ===");
+console.log('🚀 フェーズBおよび最新単語判定カードUIの一括生成を開始します...\n');
+for (const [filePath, content] of Object.entries(files)) {
+  writeFile(filePath, content);
 }
-
-main();
+console.log('\n✨ 全ファイルの生成・更新が完了しました！');

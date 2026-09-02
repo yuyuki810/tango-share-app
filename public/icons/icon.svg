@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#232A3B"/>
+  <rect x="32" y="32" width="448" height="448" rx="72" fill="#F5F4EF"/>
+  <path d="M160 140 H352 V372 H160 Z" fill="#E2483D"/>
+  <text x="256" y="280" font-size="72" font-weight="bold" fill="#FFFFFF" text-anchor="middle" font-family="sans-serif">単語</text>
+</svg>

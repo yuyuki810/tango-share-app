@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import {
   getTodayJST,
@@ -26,11 +27,31 @@ export default async function DashboardPage() {
     .single();
 
   const today = getTodayJST();
-  const weekStartDate = getThisWeekSaturdayJST(); // 土曜起点
+  const weekStartDate = getThisWeekSaturdayJST();
   const prevWeekStartDate = getPreviousSaturday(weekStartDate);
   const weekDates = getWeekDates(weekStartDate);
 
-  // 1. 今週の週間範囲
+  // 週内（土〜金）の完了済み daily_check (completed_at IS NOT NULL) を取得
+  const { data: weekDailyCheckSessions } = await supabase
+    .from('test_sessions')
+    .select('date')
+    .eq('user_id', user.id)
+    .eq('type', 'daily_check')
+    .not('completed_at', 'is', null)
+    .in('date', weekDates);
+
+  const completedDates = new Set((weekDailyCheckSessions ?? []).map((s) => s.date));
+  const isDailyCheckCompleted = completedDates.has(today);
+
+  // ストリーク情報取得
+  const { data: streakRow } = await supabase
+    .from('streaks')
+    .select('current_streak')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  const currentStreak = streakRow?.current_streak ?? 0;
+
   const { data: weeklyRange } = await supabase
     .from('weekly_ranges')
     .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')
@@ -38,7 +59,6 @@ export default async function DashboardPage() {
     .eq('week_start_date', weekStartDate)
     .maybeSingle();
 
-  // 2. 先週の週間範囲
   const { data: prevWeeklyRange } = await supabase
     .from('weekly_ranges')
     .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')
@@ -58,7 +78,6 @@ export default async function DashboardPage() {
       }
     : undefined;
 
-  // 3. 今週の日次割当
   const { data: assignments } = await supabase
     .from('daily_assignments')
     .select('date, range_start, range_end, is_review_day')
@@ -74,6 +93,7 @@ export default async function DashboardPage() {
       rangeStart: a?.range_start ?? null,
       rangeEnd: a?.range_end ?? null,
       isReviewDay: a?.is_review_day ?? false,
+      isCompleted: completedDates.has(date),
     };
   });
 
@@ -84,20 +104,26 @@ export default async function DashboardPage() {
   const wordbookTotalWords = wordbookData?.total_words ?? 0;
 
   return (
-    <main className="mx-auto max-w-md space-y-6 px-4 pb-24 pt-6">
-      {/* 上部ヘッダー */}
+    <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl w-full space-y-6 px-4 sm:px-0 pb-24 pt-6">
       <header className="flex items-center justify-between px-1">
         <div>
-          <h1 className="font-mincho text-2xl font-bold text-ink">単語帳</h1>
-          <p className="font-maru text-xs text-ink/50">毎日コツコツ、記憶を定着</p>
+          <h1 className="font-mincho text-2xl md:text-3xl font-bold text-ink">単語帳</h1>
+          <p className="font-maru text-xs md:text-sm text-ink/50">毎日コツコツ、記憶を定着</p>
         </div>
-        <div className="flex items-center gap-1.5 rounded-full border border-akashiito/30 bg-akashiito/10 px-3 py-1 font-maru text-xs font-bold text-akashiito">
-          <span>🔥</span>
-          <span>7日連続</span>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/debug"
+            className="rounded-full border border-line bg-white px-2.5 py-1 font-maru text-[10px] md:text-xs text-ink/60 hover:text-ink transition"
+          >
+            🔍 自己診断
+          </Link>
+          <div className="flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 font-maru text-xs md:text-sm font-bold text-amber-900 shadow-2xs">
+            <span>🔥</span>
+            <span>{currentStreak}日連続</span>
+          </div>
         </div>
       </header>
 
-      {/* 週間目標設定CTA */}
       <SetRangeCTA
         wordbookId={profile?.wordbook_id ?? ''}
         wordbookTotalWords={wordbookTotalWords}
@@ -110,17 +136,25 @@ export default async function DashboardPage() {
         lastWeek={lastWeekData}
       />
 
-      {/* 今日の学習カード */}
       <TodayRangeCard
         rangeStart={todayAssignment?.range_start ?? null}
         rangeEnd={todayAssignment?.range_end ?? null}
         isReviewDay={todayAssignment?.is_review_day ?? false}
         wordbookName={wordbookName}
+        isDailyCheckCompleted={isDailyCheckCompleted}
       />
 
-      {/* 週間スケジュール */}
       <section className="space-y-2">
-        <h2 className="px-1 font-mincho text-xs font-bold text-ink/60">今週のスケジュール (土〜金)</h2>
+        <div className="flex items-center justify-between px-1">
+          <h2 className="font-mincho text-xs md:text-sm font-bold text-ink/60">今週のスケジュール (土〜金)</h2>
+          <Link
+            href="/weakness"
+            className="inline-flex min-h-[44px] items-center gap-1 px-2 font-maru text-xs md:text-sm font-bold text-ink/70 transition hover:text-ink underline decoration-line underline-offset-4"
+          >
+            <span>弱点マップを見る</span>
+            <span>→</span>
+          </Link>
+        </div>
         <WeeklySchedule days={weekDays} todayDate={today} />
       </section>
     </main>

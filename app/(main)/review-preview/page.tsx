@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { WordJudgeCardScreen } from '@/components/review/WordJudgeCardScreen';
 import type { WordCardData } from '@/components/review/WordJudgeCard';

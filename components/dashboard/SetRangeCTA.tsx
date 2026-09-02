@@ -35,10 +35,11 @@ export function SetRangeCTA({
       {hasExistingRange ? (
         <div className="flex items-center justify-between px-1">
           <span className="font-maru text-xs font-medium text-ink/60">今週の学習サイクル (土〜金)</span>
+          {/* タップ領域を min-h-[44px] で確保 */}
           <button
             type="button"
             onClick={() => setIsOpen(true)}
-            className="min-h-[44px] text-xs font-bold text-ink/80 underline decoration-line underline-offset-4 transition hover:text-ink active:opacity-70"
+            className="inline-flex min-h-[44px] items-center px-2 text-xs font-bold text-ink/80 underline decoration-line underline-offset-4 transition hover:text-ink active:opacity-70 cursor-pointer"
           >
             範囲・ペースを変更する
           </button>

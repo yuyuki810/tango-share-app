@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import React from "react";
-import { Card } from "@/components/common/Card";
-import { Users, User, Copy } from "lucide-react";
-import type { GroupMember } from "@/types";
+import React from 'react';
+import { Card } from '@/components/common/Card';
+import { Users, User, Copy } from 'lucide-react';
+import type { GroupMember } from '@/types';
 
 interface GroupMembersListProps {
   groupName: string;
@@ -29,10 +29,11 @@ export const GroupMembersList: React.FC<GroupMembersListProps> = ({
             {groupName}
           </h2>
         </div>
+        {/* 固定上限「/ 4人」を廃し実人数表記に統一 */}
         <div className="flex items-center gap-1.5 rounded-full bg-paper px-3 py-1 border border-line">
           <Users className="h-3.5 w-3.5 text-ink-muted" />
           <span className="font-number text-xs font-bold text-ink">
-            {members.length} / 4人
+            {members.length}人参加中
           </span>
         </div>
       </div>
@@ -51,7 +52,7 @@ export const GroupMembersList: React.FC<GroupMembersListProps> = ({
           type="button"
           onClick={() => {
             navigator.clipboard.writeText(inviteCode);
-            alert("招待コードをコピーしました！");
+            alert('招待コードをコピーしました！');
           }}
           className="inline-flex items-center gap-1 rounded-md bg-paper-card px-2.5 py-1.5 text-xs font-semibold text-ink border border-line shadow-sm hover:bg-paper-hover active:scale-95 transition-all cursor-pointer"
         >
@@ -73,16 +74,16 @@ export const GroupMembersList: React.FC<GroupMembersListProps> = ({
                 key={member.id}
                 className={`flex items-center justify-between rounded-lg p-2.5 border transition-all ${
                   isMe
-                    ? "bg-akashiito-subtle/50 border-akashiito-border"
-                    : "bg-paper/50 border-line/60"
+                    ? 'bg-akashiito-subtle/50 border-akashiito-border'
+                    : 'bg-paper/50 border-line/60'
                 }`}
               >
                 <div className="flex items-center gap-2.5">
                   <div
                     className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
                       isMe
-                        ? "bg-akashiito text-white"
-                        : "bg-line text-ink-muted"
+                        ? 'bg-akashiito text-white'
+                        : 'bg-line text-ink-muted'
                     }`}
                   >
                     <User className="h-3.5 w-3.5" />
@@ -100,7 +101,7 @@ export const GroupMembersList: React.FC<GroupMembersListProps> = ({
                 </div>
                 <div className="text-right">
                   <span className="inline-block rounded px-2 py-0.5 text-[11px] bg-paper-card border border-line text-ink-muted font-medium">
-                    {member.wordbooks?.name || "単語帳未設定"}
+                    {member.wordbooks?.name || '単語帳未設定'}
                   </span>
                 </div>
               </li>

@@ -13,6 +13,14 @@ export function getTodayJST(): string {
   });
 }
 
+/** 指定日(YYYY-MM-DD)の前日(-1日)の日付(YYYY-MM-DD)を返す */
+export function getYesterday(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
 /** 指定日(YYYY-MM-DD)が属する「土曜始まりの週」の土曜日の日付を返す */
 export function getSaturdayOf(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);

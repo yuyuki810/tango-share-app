@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -44,7 +44,7 @@ export const CreateGroupForm = () => {
       <h2 className="font-mincho text-base font-bold text-ink mb-3">新しいグループを作る</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <p className="text-xs text-akashiito">{error}</p>}
-        <Input placeholder="例: 東大志望4人組" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Input placeholder="例: 東大志望グループ" value={name} onChange={(e) => setName(e.target.value)} required />
         <Button type="submit" variant="primary" size="lg" isLoading={loading}>
           グループを作成して招待コードを発行
         </Button>
