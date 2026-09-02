@@ -1,4 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
+/**
+ * fix_complete_route.js
+ * app/api/test-sessions/complete/route.ts の型エラーを修正するスクリプト
+ * 
+ * 実行方法:
+ *   node fix_complete_route.js
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+const filePath = path.join(process.cwd(), 'app/api/test-sessions/complete/route.ts');
+
+const content = `import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTodayJST } from "@/lib/assignment/weekDates";
 import { updateStreak } from "@/lib/streak/updateStreak";
@@ -152,3 +165,7 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+`;
+
+fs.writeFileSync(filePath, content.trim() + '\n', 'utf8');
+console.log('✅ app/api/test-sessions/complete/route.ts の修正が完了しました！');
