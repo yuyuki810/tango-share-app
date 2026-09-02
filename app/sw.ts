@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-declare const self: ServiceWorkerGlobalScope;
+declare const self: any;
 
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
@@ -16,13 +16,10 @@ const serwist = new Serwist({
   clientsClaim: true,
   navigationPreload: true,
   runtimeCaching: [
-    // 1. テスト送信・回答保存などのAPIルートは絶対にキャッシュせず常にネットワーク優先
     {
       matcher: ({ url }) => url.pathname.startsWith("/api/"),
       handler: new NetworkOnly(),
     },
-    // 2. 動的ページ（ダッシュボード・グループ・弱点マップ等）: NetworkFirst 戦略
-    // オンライン時は常に最新を取得し、回線切断・不安定時のみ直近のキャッシュにフォールバック
     {
       matcher: ({ request }) => request.mode === "navigate",
       handler: new NetworkFirst({
@@ -30,7 +27,6 @@ const serwist = new Serwist({
         networkTimeoutSeconds: 3,
       }),
     },
-    // 3. 静的アセット・フォント・画像などのデフォルトキャッシュ
     ...defaultCache,
   ],
 });

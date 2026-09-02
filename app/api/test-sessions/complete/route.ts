@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
           answers: answerList.map((a) => ({ wordId: a.word_id, isKnown: a.is_known })),
         });
       } catch (scoreErr) {
-        console.error("Failed to compute daily score:", scoreErr);
+        console.error("Failed to compute daily score:", (scoreErr && scoreErr.message) || String(scoreErr));
       }
     }
 
@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("Complete API fatal error:", err);
     return NextResponse.json(
-      { error: "Internal Server Error", detail: err?.message || String(err) },
+      { error: "Internal Server Error", detail: (err && err.message) || String(err) },
       { status: 500 }
     );
   }

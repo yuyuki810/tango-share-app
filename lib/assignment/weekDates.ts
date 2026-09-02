@@ -3,6 +3,8 @@
  * 週のサイクルは「土曜日始まり・金曜日終わり」の7日間
  */
 
+export const DAY_LABELS_SAT = ['土', '日', '月', '火', '水', '木', '金'] as const;
+
 export function getTodayJST(): string {
   const now = new Date();
   return now.toLocaleString('en-CA', {
@@ -46,7 +48,7 @@ export function getPreviousSaturday(saturdayStr: string): string {
 export function getWeekDates(saturdayStr: string): string[] {
   const [y, m, d] = saturdayStr.split('-').map(Number);
   const saturday = new Date(Date.UTC(y, m - 1, d));
-  const dates: string[] = [];
+  const dates = [];
   for (let i = 0; i < 7; i++) {
     const dt = new Date(saturday);
     dt.setUTCDate(saturday.getUTCDate() + i);
