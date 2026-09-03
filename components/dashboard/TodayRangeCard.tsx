@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, RotateCcw } from 'lucide-react';
 
 interface TodayRangeCardProps {
   rangeStart: number | null;
@@ -9,6 +9,7 @@ interface TodayRangeCardProps {
   isReviewDay: boolean;
   wordbookName: string;
   isDailyCheckCompleted?: boolean;
+  hasIncompleteSession?: boolean;
 }
 
 export function TodayRangeCard({
@@ -17,6 +18,7 @@ export function TodayRangeCard({
   isReviewDay,
   wordbookName,
   isDailyCheckCompleted = false,
+  hasIncompleteSession = false,
 }: TodayRangeCardProps) {
   const hasRange = rangeStart !== null && rangeEnd !== null;
   const wordCount = hasRange ? rangeEnd - rangeStart + 1 : 0;
@@ -47,10 +49,12 @@ export function TodayRangeCard({
               className={`rounded-full px-2.5 py-0.5 font-maru text-[10px] font-bold border ${
                 isDailyCheckCompleted
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : hasIncompleteSession
+                  ? 'bg-amber-50 text-amber-900 border-amber-300'
                   : 'bg-akashiito/10 text-akashiito border-akashiito-border'
               }`}
             >
-              本番チェック: {isDailyCheckCompleted ? '済' : '未'}
+              {isDailyCheckCompleted ? '本番チェック: 済' : hasIncompleteSession ? '本番チェック: 中断中' : '本番チェック: 未'}
             </span>
           )}
         </div>
@@ -80,11 +84,13 @@ export function TodayRangeCard({
             <>
               <Link
                 href="/test?mode=daily_check"
-                className="flex min-h-[54px] w-full items-center justify-center rounded-2xl bg-akashiito font-mincho text-base font-bold text-paper shadow-md shadow-akashiito/20 transition active:scale-98 hover:opacity-95"
+                className={`flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl font-mincho text-base font-bold text-paper shadow-md transition active:scale-98 hover:opacity-95 ${
+                  hasIncompleteSession ? 'bg-amber-700 shadow-amber-700/20' : 'bg-akashiito shadow-akashiito/20'
+                }`}
               >
-                今日の本番チェックを受ける
+                {hasIncompleteSession && <RotateCcw className="h-4 w-4" />}
+                <span>{hasIncompleteSession ? '前回の続きから再開する' : '今日の本番チェックを受ける'}</span>
               </Link>
-              {/* タップ領域を 44px 相当の快適なチップ化 */}
               <div className="text-center pt-1">
                 <Link
                   href="/test?mode=normal"

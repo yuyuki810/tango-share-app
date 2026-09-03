@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { WordJudgeCardScreen } from '@/components/review/WordJudgeCardScreen';
 import type { WordCardData } from '@/components/review/WordJudgeCard';
 import { ChunkSummaryScreen, type ChunkResultItem } from '@/components/weakness/ChunkSummaryScreen';
@@ -24,6 +24,7 @@ export function TestSessionRunner({
   reviewChunks = [],
 }: TestSessionRunnerProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [resumePrompt, setResumePrompt] = useState<{
     answeredCount: number;
@@ -32,6 +33,9 @@ export function TestSessionRunner({
 
   const [initialIndex, setInitialIndex] = useState(0);
   const [initialAnswers, setInitialAnswers] = useState<Map<string, boolean>>(new Map());
+
+  // セッション未確立時の判定キュー
+  const pendingAnswersQueue = useRef<Array<{ wordId: string; isKnown: boolean }>>([]);
 
   const [resultData, setResultData] = useState<{
     correctCount: number;
@@ -70,7 +74,27 @@ export function TestSessionRunner({
         if (!isMounted) return;
 
         if (res.ok && data.success) {
-          setSessionId(data.session.id);
+          const currentId = data.session.id;
+          setSessionId(currentId);
+          sessionIdRef.current = currentId;
+
+          // キューに溜まった回答があれば即座にフラッシュ送信
+          if (pendingAnswersQueue.current.length > 0) {
+            pendingAnswersQueue.current.forEach((item) => {
+              const matchedCard = cards.find((c) => c.wordId === item.wordId);
+              fetch('/api/test-sessions/answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: currentId,
+                  wordId: item.wordId,
+                  isKnown: item.isKnown,
+                  originDailyAssignmentId: matchedCard?.originDailyAssignmentId || dailyAssignmentId,
+                }),
+              }).catch((e) => console.error('Queue flush error:', e));
+            });
+            pendingAnswersQueue.current = [];
+          }
 
           // 未完了セッションがあり、回答済みの単語がある場合
           if (data.mode === 'resume' && data.answeredWords && data.answeredWords.length > 0) {
@@ -79,14 +103,12 @@ export function TestSessionRunner({
               answeredMap.set(a.wordId, a.isKnown);
             });
 
-            // まだ未回答の単語が残っている場合は再開ダイアログを表示
             if (data.answeredWords.length < cards.length) {
               setResumePrompt({
                 answeredCount: data.answeredWords.length,
                 answeredMap,
               });
             } else {
-              // 既に全問解いている場合はそのまま完了判定へ
               setInitialAnswers(answeredMap);
               setInitialIndex(cards.length);
             }
@@ -107,16 +129,22 @@ export function TestSessionRunner({
     };
   }, [sessionType, dailyAssignmentId, cards.length]);
 
-  // 2. 単語判定のたびに即座に都度保存 (/api/test-sessions/answer)
+  // 2. 単語判定のたびに即座に都度保存 (レースコンディション完全防止)
   const handleSingleJudge = (wordId: string, isKnown: boolean) => {
-    if (!sessionId) return;
-
+    const currentId = sessionIdRef.current;
     const matchedCard = cards.find((c) => c.wordId === wordId);
+
+    if (!currentId) {
+      // セッションID未確定時はキューに退避
+      pendingAnswersQueue.current.push({ wordId, isKnown });
+      return;
+    }
+
     fetch('/api/test-sessions/answer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sessionId,
+        sessionId: currentId,
         wordId,
         isKnown,
         originDailyAssignmentId: matchedCard?.originDailyAssignmentId || dailyAssignmentId,
@@ -128,6 +156,7 @@ export function TestSessionRunner({
 
   // 3. 全問終了時のセッション完了確定処理 (/api/test-sessions/complete)
   const handleFinished = (resultsMap: Map<string, boolean>) => {
+    const currentId = sessionIdRef.current;
     const results = cards.map((c) => ({
       wordId: c.wordId,
       isKnown: resultsMap.get(c.wordId) ?? false,
@@ -200,7 +229,7 @@ export function TestSessionRunner({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sessionId,
+        sessionId: currentId,
         results,
       }),
     })
@@ -248,7 +277,7 @@ export function TestSessionRunner({
     return (
       <div className="mx-auto flex min-h-[85vh] max-w-md md:max-w-xl flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
         <div className="w-full rounded-3xl border border-line bg-white p-6 shadow-sm space-y-4">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-600 border border-amber-200">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-700 border border-amber-300">
             <RotateCcw className="h-6 w-6" />
           </div>
 
@@ -272,7 +301,7 @@ export function TestSessionRunner({
                 setInitialIndex(resumePrompt.answeredCount);
                 setResumePrompt(null);
               }}
-              className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-sm transition active:scale-98 cursor-pointer"
+              className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-sm transition active:scale-98 cursor-pointer hover:bg-ink/90"
             >
               <Play className="h-4 w-4 fill-paper" />
               <span>続きから再開する（{resumePrompt.answeredCount + 1}問目〜）</span>

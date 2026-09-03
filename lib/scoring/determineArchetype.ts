@@ -20,24 +20,17 @@ export interface ArchetypeResult {
 }
 
 /**
- * メンバーのスコア系アーキタイプを判定する (優先順位順に評価)
- * 1. ゾンビ・グリット型 (物量突破)
- * 2. レジェンド・コレクター型 (高難度制覇)
- * 3. パーフェクト・スナイパー型 (精密無比)
- * 4. タイブレーク・チャンピオン型 (僅差の覇者)
- * 5. 急成長型 (自己ベスト更新)
+ * メンバーのスコア系アーキタイプをインメモリで同期判定する (N+1ネットワーク遅延を完全解消)
  */
-export async function determineArchetype(
-  supabase: SupabaseClient,
+export function determineArchetype(
   targetUserId: string,
-  date: string,
-  allGroupEntriesForDate: DailyScoreEntryData[]
-): Promise<ArchetypeResult | null> {
+  allGroupEntriesForDate: DailyScoreEntryData[],
+  recentScoresForUser: number[] = []
+): ArchetypeResult | null {
   const self = allGroupEntriesForDate.find((e) => e.user_id === targetUserId);
   if (!self) return null;
 
   // 1. ゾンビ・グリット型 (物量突破)
-  // normalized_score >= 85 かつ accuracy_rate < 0.65
   if (self.normalized_score >= 85 && (self.accuracy_rate ?? 0) < 0.65) {
     return {
       key: 'zombie_grit',
@@ -49,7 +42,6 @@ export async function determineArchetype(
   }
 
   // 2. レジェンド・コレクター型 (高難度制覇)
-  // accuracy_rate >= 0.9 かつ avg_difficulty_weight >= 1.2 かつ word_count >= 15
   if (
     (self.accuracy_rate ?? 0) >= 0.9 &&
     (self.avg_difficulty_weight ?? 0) >= 1.2 &&
@@ -65,7 +57,6 @@ export async function determineArchetype(
   }
 
   // 3. パーフェクト・スナイパー型 (精密無比)
-  // accuracy_rate >= 0.95 かつ normalized_score < 55 かつ word_count >= 5
   if (
     (self.accuracy_rate ?? 0) >= 0.95 &&
     self.normalized_score < 55 &&
@@ -81,7 +72,6 @@ export async function determineArchetype(
   }
 
   // 4. タイブレーク・チャンピオン型 (僅差の覇者)
-  // 同日・同groupで normalized_score が同点の他メンバーが存在し、そのメンバー達の raw_score の最大値より自分の raw_score が厳密に大きい
   const tiedOthers = allGroupEntriesForDate.filter(
     (e) => e.user_id !== targetUserId && e.normalized_score === self.normalized_score
   );
@@ -99,18 +89,9 @@ export async function determineArchetype(
   }
 
   // 5. 急成長型 (自己ベスト更新)
-  // 対象日より前の直近5件の daily_score_entries の normalized_score 平均と比べ、今日が +20 以上 (直近データ3件以上の場合のみ判定)
-  const { data: recentScores } = await supabase
-    .from('daily_score_entries')
-    .select('normalized_score')
-    .eq('user_id', targetUserId)
-    .lt('date', date)
-    .order('date', { ascending: false })
-    .limit(5);
-
-  if (recentScores && recentScores.length >= 3) {
-    const sum = recentScores.reduce((acc, r) => acc + (r.normalized_score ?? 0), 0);
-    const avg = sum / recentScores.length;
+  if (recentScoresForUser.length >= 3) {
+    const sum = recentScoresForUser.reduce((acc, score) => acc + score, 0);
+    const avg = sum / recentScoresForUser.length;
     if (self.normalized_score - avg >= 20) {
       return {
         key: 'rapid_growth',

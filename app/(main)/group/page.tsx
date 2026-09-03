@@ -43,51 +43,61 @@ export default async function GroupPage() {
     );
   }
 
-  const { data: group } = await supabase
-    .from('groups')
-    .select('id, name, invite_code')
-    .eq('id', me.group_id)
-    .single();
-
-  const { data: members } = await supabase
-    .from('users')
-    .select('id, name, wordbook_id, wordbooks(name)')
-    .eq('group_id', me.group_id);
-
   const today = getTodayJST();
-  const memberList = members ?? [];
+
+  // [並列化 1] グループ情報とメンバー一覧を同時に取得
+  const [groupRes, membersRes] = await Promise.all([
+    supabase.from('groups').select('id, name, invite_code').eq('id', me.group_id).single(),
+    supabase.from('users').select('id, name, wordbook_id, wordbooks(name)').eq('group_id', me.group_id),
+  ]);
+
+  const group = groupRes.data;
+  const memberList = membersRes.data ?? [];
   const memberIds = memberList.map((m) => m.id);
 
-  // 1. 本日の 完了済み daily_check セッションを取得 (completed_at IS NOT NULL)
-  const { data: todaySessions } = await supabase
-    .from('test_sessions')
-    .select('user_id')
-    .eq('type', 'daily_check')
-    .eq('date', today)
-    .not('completed_at', 'is', null)
-    .in('user_id', memberIds);
+  // [並列化 2] 本日のセッション、スコア、ストリーク、過去履歴を一括並列取得 (N+1解消)
+  const [todaySessionsRes, scoreRowsRes, streaksRes, recentScoresRes] = await Promise.all([
+    supabase
+      .from('test_sessions')
+      .select('user_id')
+      .eq('type', 'daily_check')
+      .eq('date', today)
+      .not('completed_at', 'is', null)
+      .in('user_id', memberIds),
+    supabase
+      .from('daily_score_entries')
+      .select('user_id, date, raw_score, normalized_score, word_count, accuracy_rate, avg_difficulty_weight, avg_diminishing_factor')
+      .eq('date', today)
+      .in('user_id', memberIds),
+    supabase
+      .from('streaks')
+      .select('user_id, current_streak')
+      .in('user_id', memberIds),
+    supabase
+      .from('daily_score_entries')
+      .select('user_id, normalized_score, date')
+      .in('user_id', memberIds)
+      .lt('date', today)
+      .order('date', { ascending: false })
+      .limit(20),
+  ]);
 
-  const doneUserIds = new Set((todaySessions ?? []).map((s) => s.user_id));
-
-  // 2. 本日のスコアエントリーを取得
-  const { data: scoreRows } = await supabase
-    .from('daily_score_entries')
-    .select('user_id, date, raw_score, normalized_score, word_count, accuracy_rate, avg_difficulty_weight, avg_diminishing_factor')
-    .eq('date', today)
-    .in('user_id', memberIds);
-
-  const allGroupEntries = (scoreRows ?? []) as DailyScoreEntryData[];
+  const doneUserIds = new Set((todaySessionsRes.data ?? []).map((s) => s.user_id));
+  const allGroupEntries = (scoreRowsRes.data ?? []) as DailyScoreEntryData[];
   const scoreMap = new Map(allGroupEntries.map((s) => [s.user_id, s]));
+  const streakMap = new Map((streaksRes.data ?? []).map((s) => [s.user_id, s.current_streak ?? 0]));
 
-  // 3. 各メンバーのストリークを取得
-  const { data: streaks } = await supabase
-    .from('streaks')
-    .select('user_id, current_streak')
-    .in('user_id', memberIds);
+  // 過去スコアをユーザーごとに整理
+  const recentScoresByUser = new Map<string, number[]>();
+  (recentScoresRes.data ?? []).forEach((r) => {
+    const list = recentScoresByUser.get(r.user_id) ?? [];
+    if (list.length < 5) {
+      list.push(r.normalized_score ?? 0);
+      recentScoresByUser.set(r.user_id, list);
+    }
+  });
 
-  const streakMap = new Map((streaks ?? []).map((s) => [s.user_id, s.current_streak ?? 0]));
-
-  // 4. 受験済みメンバーをランキング順にソート (normalized_score 降順 -> raw_score 降順)
+  // ランキングソート
   const doneMembers = memberList.filter((m) => doneUserIds.has(m.id));
   const notDoneMembers = memberList.filter((m) => !doneUserIds.has(m.id));
   const isMeDone = doneUserIds.has(user.id);
@@ -104,10 +114,14 @@ export default async function GroupPage() {
     return rawB - rawA;
   });
 
-  // 5. 各受験メンバーのアーキタイプを判定
+  // インメモリでアーキタイプを即時判定 (通信ラグゼロ)
   const archetypeMap = new Map<string, ArchetypeResult | null>();
   for (const m of doneMembers) {
-    const arch = await determineArchetype(supabase, m.id, today, allGroupEntries);
+    const arch = determineArchetype(
+      m.id,
+      allGroupEntries,
+      recentScoresByUser.get(m.id) ?? []
+    );
     archetypeMap.set(m.id, arch);
   }
 

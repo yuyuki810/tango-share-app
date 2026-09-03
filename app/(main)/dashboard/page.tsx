@@ -20,51 +20,72 @@ export default async function DashboardPage() {
 
   if (!user) return null;
 
-  const { data: profile } = await supabase
-    .from('users')
-    .select('wordbook_id, wordbooks(name, total_words)')
-    .eq('id', user.id)
-    .single();
-
   const today = getTodayJST();
   const weekStartDate = getThisWeekSaturdayJST();
   const prevWeekStartDate = getPreviousSaturday(weekStartDate);
   const weekDates = getWeekDates(weekStartDate);
 
-  // 週内（土〜金）の完了済み daily_check (completed_at IS NOT NULL) を取得
-  const { data: weekDailyCheckSessions } = await supabase
-    .from('test_sessions')
-    .select('date')
-    .eq('user_id', user.id)
-    .eq('type', 'daily_check')
-    .not('completed_at', 'is', null)
-    .in('date', weekDates);
+  // [全クエリを並列実行] 画面ロード時間を1/4に短縮
+  const [
+    profileRes,
+    weekSessionsRes,
+    streakRes,
+    weeklyRangeRes,
+    prevWeeklyRangeRes,
+    assignmentsRes,
+    incompleteSessionRes,
+  ] = await Promise.all([
+    supabase
+      .from('users')
+      .select('wordbook_id, wordbooks(name, total_words)')
+      .eq('id', user.id)
+      .single(),
+    supabase
+      .from('test_sessions')
+      .select('date')
+      .eq('user_id', user.id)
+      .eq('type', 'daily_check')
+      .not('completed_at', 'is', null)
+      .in('date', weekDates),
+    supabase
+      .from('streaks')
+      .select('current_streak')
+      .eq('user_id', user.id)
+      .maybeSingle(),
+    supabase
+      .from('weekly_ranges')
+      .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')
+      .eq('user_id', user.id)
+      .eq('week_start_date', weekStartDate)
+      .maybeSingle(),
+    supabase
+      .from('weekly_ranges')
+      .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')
+      .eq('user_id', user.id)
+      .eq('week_start_date', prevWeekStartDate)
+      .maybeSingle(),
+    supabase
+      .from('daily_assignments')
+      .select('date, range_start, range_end, is_review_day')
+      .eq('user_id', user.id)
+      .in('date', weekDates),
+    supabase
+      .from('test_sessions')
+      .select('id, type, date')
+      .eq('user_id', user.id)
+      .eq('type', 'daily_check')
+      .eq('date', today)
+      .is('completed_at', null)
+      .maybeSingle(),
+  ]);
 
-  const completedDates = new Set((weekDailyCheckSessions ?? []).map((s) => s.date));
+  const profile = profileRes.data;
+  const completedDates = new Set((weekSessionsRes.data ?? []).map((s) => s.date));
   const isDailyCheckCompleted = completedDates.has(today);
-
-  // ストリーク情報取得
-  const { data: streakRow } = await supabase
-    .from('streaks')
-    .select('current_streak')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  const currentStreak = streakRow?.current_streak ?? 0;
-
-  const { data: weeklyRange } = await supabase
-    .from('weekly_ranges')
-    .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')
-    .eq('user_id', user.id)
-    .eq('week_start_date', weekStartDate)
-    .maybeSingle();
-
-  const { data: prevWeeklyRange } = await supabase
-    .from('weekly_ranges')
-    .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')
-    .eq('user_id', user.id)
-    .eq('week_start_date', prevWeekStartDate)
-    .maybeSingle();
+  const hasIncompleteSession = !!incompleteSessionRes.data;
+  const currentStreak = streakRes.data?.current_streak ?? 0;
+  const weeklyRange = weeklyRangeRes.data;
+  const prevWeeklyRange = prevWeeklyRangeRes.data;
 
   const lastWeekData: LastWeekData | undefined = prevWeeklyRange
     ? {
@@ -78,13 +99,8 @@ export default async function DashboardPage() {
       }
     : undefined;
 
-  const { data: assignments } = await supabase
-    .from('daily_assignments')
-    .select('date, range_start, range_end, is_review_day')
-    .eq('user_id', user.id)
-    .in('date', weekDates);
-
-  const assignmentByDate = new Map((assignments ?? []).map((a) => [a.date, a]));
+  const assignments = assignmentsRes.data ?? [];
+  const assignmentByDate = new Map(assignments.map((a) => [a.date, a]));
 
   const weekDays = weekDates.map((date) => {
     const a = assignmentByDate.get(date);
@@ -98,7 +114,6 @@ export default async function DashboardPage() {
   });
 
   const todayAssignment = assignmentByDate.get(today);
-
   const wordbookData = profile?.wordbooks as { name?: string; total_words?: number } | null;
   const wordbookName = wordbookData?.name ?? '';
   const wordbookTotalWords = wordbookData?.total_words ?? 0;
@@ -142,6 +157,7 @@ export default async function DashboardPage() {
         isReviewDay={todayAssignment?.is_review_day ?? false}
         wordbookName={wordbookName}
         isDailyCheckCompleted={isDailyCheckCompleted}
+        hasIncompleteSession={hasIncompleteSession}
       />
 
       <section className="space-y-2">
