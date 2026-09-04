@@ -33,8 +33,6 @@ export function TestSessionRunner({
 
   const [initialIndex, setInitialIndex] = useState(0);
   const [initialAnswers, setInitialAnswers] = useState<Map<string, boolean>>(new Map());
-
-  // セッション未確立時の判定キュー
   const pendingAnswersQueue = useRef<Array<{ wordId: string; isKnown: boolean }>>([]);
 
   const [resultData, setResultData] = useState<{
@@ -78,7 +76,6 @@ export function TestSessionRunner({
           setSessionId(currentId);
           sessionIdRef.current = currentId;
 
-          // キューに溜まった回答があれば即座にフラッシュ送信
           if (pendingAnswersQueue.current.length > 0) {
             pendingAnswersQueue.current.forEach((item) => {
               const matchedCard = cards.find((c) => c.wordId === item.wordId);
@@ -96,7 +93,6 @@ export function TestSessionRunner({
             pendingAnswersQueue.current = [];
           }
 
-          // 未完了セッションがあり、回答済みの単語がある場合
           if (data.mode === 'resume' && data.answeredWords && data.answeredWords.length > 0) {
             const answeredMap = new Map<string, boolean>();
             data.answeredWords.forEach((a: any) => {
@@ -129,13 +125,12 @@ export function TestSessionRunner({
     };
   }, [sessionType, dailyAssignmentId, cards.length]);
 
-  // 2. 単語判定のたびに即座に都度保存 (レースコンディション完全防止)
+  // 2. 単語判定のたびに即座に都度保存
   const handleSingleJudge = (wordId: string, isKnown: boolean) => {
     const currentId = sessionIdRef.current;
     const matchedCard = cards.find((c) => c.wordId === wordId);
 
     if (!currentId) {
-      // セッションID未確定時はキューに退避
       pendingAnswersQueue.current.push({ wordId, isKnown });
       return;
     }
@@ -154,7 +149,7 @@ export function TestSessionRunner({
     });
   };
 
-  // 3. 全問終了時のセッション完了確定処理 (/api/test-sessions/complete)
+  // 3. 全問終了時のセッション完了確定処理 (正答率ベースでサマリー判定)
   const handleFinished = (resultsMap: Map<string, boolean>) => {
     const currentId = sessionIdRef.current;
     const results = cards.map((c) => ({
@@ -178,15 +173,14 @@ export function TestSessionRunner({
         );
         const cTotal = chunkCards.length;
         const cCorrect = chunkCards.filter((c) => resultsMap.get(c.wordId) ?? false).length;
-        const cMistakes = cTotal - cCorrect;
-        const cMistakeRate = cTotal > 0 ? Math.round((cMistakes / cTotal) * 100) / 100 : 0;
+        const cAccuracy = cTotal > 0 ? Math.round((cCorrect / cTotal) * 100) : 0;
 
         let status: 'improved' | 'same' | 'worse' | 'first' = 'first';
-        if (rc.prevMistakeRate !== null) {
-          const diff = cMistakeRate - rc.prevMistakeRate;
-          if (diff <= -0.1) {
+        if (rc.prevAccuracyRate !== null) {
+          const diff = cAccuracy - rc.prevAccuracyRate;
+          if (diff >= 10) {
             status = 'improved';
-          } else if (diff >= 0.1) {
+          } else if (diff <= -10) {
             status = 'worse';
           } else {
             status = 'same';
@@ -202,8 +196,8 @@ export function TestSessionRunner({
           originDate: rc.originDate,
           correctCount: cCorrect,
           totalCount: cTotal,
-          mistakeRate: cMistakeRate,
-          prevMistakeRate: rc.prevMistakeRate,
+          accuracyRate: cAccuracy,
+          prevAccuracyRate: rc.prevAccuracyRate,
           status,
         };
       });
@@ -224,7 +218,6 @@ export function TestSessionRunner({
 
     setSaveStatus({ isSaving: true, isSuccess: false });
 
-    // セッション完了確定
     fetch('/api/test-sessions/complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -261,7 +254,6 @@ export function TestSessionRunner({
       });
   };
 
-  // ローディング中
   if (isInitializing) {
     return (
       <div className="flex h-[80vh] flex-col items-center justify-center gap-3 text-ink/60 font-maru">
@@ -271,7 +263,6 @@ export function TestSessionRunner({
     );
   }
 
-  // 再開確認ダイアログ
   if (resumePrompt) {
     const isDailyCheck = sessionType === 'daily_check';
     return (

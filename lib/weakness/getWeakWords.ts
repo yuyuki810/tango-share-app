@@ -6,7 +6,7 @@ export interface WeakWordCard {
   pronunciation?: string;
   meaning: string;
   studyCount: number;
-  mistakeRate: number;
+  accuracyRate: number; // 0..100 (%)
   number?: number;
   originDailyAssignmentId?: string;
 }
@@ -45,7 +45,6 @@ export async function getWeakWords(
   const wordMap = new Map<string, (typeof words)[0]>();
   words.forEach((w) => wordMap.set(w.id, w));
 
-  // ユーザーの全回答を取得（URL文字数制限を回避）
   const { data: sessions } = await supabase
     .from('test_sessions')
     .select('id, created_at, test_answers(id, is_known, word_id, created_at, origin_daily_assignment_id)')
@@ -79,11 +78,12 @@ export async function getWeakWords(
     if (!wordAnswers || wordAnswers.length === 0) continue;
 
     const totalAttempts = wordAnswers.length;
-    const mistakeCount = wordAnswers.filter((a) => !a.is_known).length;
-    const mistakeRate = mistakeCount / totalAttempts;
+    const correctCount = wordAnswers.filter((a) => a.is_known).length;
+    const accuracyRate = totalAttempts > 0 ? Math.round((correctCount / totalAttempts) * 100) : 0;
     const lastAnswer = wordAnswers[wordAnswers.length - 1];
 
-    const isWeak = !lastAnswer.is_known || mistakeRate >= 0.4;
+    // 苦手判定: 直近が不正解、または通算正答率が60%以下
+    const isWeak = !lastAnswer.is_known || accuracyRate <= 60;
 
     if (isWeak) {
       weakCards.push({
@@ -92,14 +92,15 @@ export async function getWeakWords(
         pronunciation: word.pronunciation ?? undefined,
         meaning: word.meaning,
         studyCount: totalAttempts,
-        mistakeRate: Math.round(mistakeRate * 100) / 100,
+        accuracyRate,
         number: word.number,
         originDailyAssignmentId: targetChunkId || lastAnswer.origin_daily_assignment_id || undefined,
       });
     }
   }
 
-  weakCards.sort((a, b) => b.mistakeRate - a.mistakeRate || (a.number ?? 0) - (b.number ?? 0));
+  // 正答率の低い順（最も苦手な単語順）にソート
+  weakCards.sort((a, b) => a.accuracyRate - b.accuracyRate || (a.number ?? 0) - (b.number ?? 0));
 
   return weakCards.slice(0, 50);
 }

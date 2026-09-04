@@ -10,15 +10,23 @@ export interface ChunkMistakeWord {
   totalCount: number;
 }
 
+export interface ChunkHistoryPoint {
+  testDate: string;
+  accuracyRate: number; // 0..100 (%)
+  correctCount: number;
+  totalCount: number;
+}
+
 export interface ChunkStat {
   chunkId: string;
   rangeStart: number;
   rangeEnd: number;
   originDate: string;
   totalAttempts: number;
-  mistakeCount: number;
-  mistakeRate: number;
-  history: Array<{ testDate: string; mistakeRate: number }>;
+  correctCount: number;
+  accuracyRate: number; // 0..100 (%)
+  fullHistory: ChunkHistoryPoint[];  // 範囲全体テストの推移
+  drillHistory: ChunkHistoryPoint[]; // 間違えた単語のみの再テスト推移
   needsAttention: boolean;
   mistakeWords: ChunkMistakeWord[];
 }
@@ -41,7 +49,7 @@ export async function computeChunkStats(
     return [];
   }
 
-  // 2. 単語帳の全単語情報を取得（メモリ上でのO(1)参照マップ）
+  // 2. 単語帳の全単語情報を取得
   const { data: words, error: wordsError } = await supabase
     .from('words')
     .select('id, word, pronunciation, meaning, number')
@@ -51,15 +59,15 @@ export async function computeChunkStats(
     return [];
   }
 
-  const wordMap = new Map<string, { id: string; word: string; pronunciation?: string | null; meaning: string; number: number }>();
+  const wordMap = new Map<string, (typeof words)[0]>();
   words.forEach((w) => {
     wordMap.set(w.id, w);
   });
 
-  // 3. ユーザーの全回答履歴をセッション経由で取得（URL文字数制限を完全回避）
+  // 3. ユーザーの全回答履歴を取得
   const { data: sessions } = await supabase
     .from('test_sessions')
-    .select('id, date, created_at, test_answers(id, is_known, origin_daily_assignment_id, word_id, created_at)')
+    .select('id, date, type, completed_at, created_at, test_answers(id, is_known, origin_daily_assignment_id, word_id, created_at)')
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
 
@@ -69,6 +77,7 @@ export async function computeChunkStats(
     origin_daily_assignment_id?: string | null;
     word_id: string;
     session_id: string;
+    session_type: string;
     date: string;
     created_at: string;
   }> = [];
@@ -82,6 +91,7 @@ export async function computeChunkStats(
         origin_daily_assignment_id: a.origin_daily_assignment_id,
         word_id: a.word_id,
         session_id: s.id,
+        session_type: s.type || 'normal',
         date: s.date,
         created_at: a.created_at || s.created_at,
       });
@@ -90,6 +100,8 @@ export async function computeChunkStats(
 
   // 4. 各チャンクごとに集計
   return assignments.map((assignment) => {
+    const chunkWordCount = assignment.range_end - assignment.range_start + 1;
+
     const chunkAnswers = allAnswers.filter((ans) => {
       if (ans.origin_daily_assignment_id === assignment.id) {
         return true;
@@ -99,14 +111,23 @@ export async function computeChunkStats(
     });
 
     const totalAttempts = chunkAnswers.length;
-    const mistakeCount = chunkAnswers.filter((a) => !a.is_known).length;
+    const correctCount = chunkAnswers.filter((a) => a.is_known).length;
 
     // history: テストセッションごとにグルーピング
-    const sessionMap = new Map<string, { date: string; created_at: string; answers: typeof chunkAnswers }>();
+    const sessionMap = new Map<
+      string,
+      { date: string; created_at: string; type: string; answers: typeof chunkAnswers }
+    >();
+
     chunkAnswers.forEach((ans) => {
       const sId = ans.session_id;
       if (!sessionMap.has(sId)) {
-        sessionMap.set(sId, { date: ans.date, created_at: ans.created_at, answers: [] });
+        sessionMap.set(sId, {
+          date: ans.date,
+          created_at: ans.created_at,
+          type: ans.session_type,
+          answers: [],
+        });
       }
       sessionMap.get(sId)!.answers.push(ans);
     });
@@ -115,31 +136,50 @@ export async function computeChunkStats(
       a.created_at.localeCompare(b.created_at)
     );
 
-    const history = sortedSessions.map((s) => {
+    const fullHistory: ChunkHistoryPoint[] = [];
+    const drillHistory: ChunkHistoryPoint[] = [];
+
+    sortedSessions.forEach((s) => {
       const sTotal = s.answers.length;
-      const sMistakes = s.answers.filter((a) => !a.is_known).length;
-      return {
+      const sCorrect = s.answers.filter((a) => a.is_known).length;
+      const accuracyRate = sTotal > 0 ? Math.round((sCorrect / sTotal) * 100) : 0;
+
+      // 範囲全体テスト (daily_check または チャンク総単語数の70%以上) vs 苦手克服ドリル
+      const isFullScope =
+        s.type === 'daily_check' || sTotal >= Math.min(Math.ceil(chunkWordCount * 0.7), chunkWordCount);
+
+      const point: ChunkHistoryPoint = {
         testDate: s.date,
-        mistakeRate: sTotal > 0 ? Math.round((sMistakes / sTotal) * 100) / 100 : 0,
+        accuracyRate,
+        correctCount: sCorrect,
+        totalCount: sTotal,
       };
+
+      if (isFullScope) {
+        fullHistory.push(point);
+      } else {
+        drillHistory.push(point);
+      }
     });
 
-    // 最新のミス率
-    let currentMistakeRate = 0;
-    if (history.length > 0) {
-      currentMistakeRate = history[history.length - 1].mistakeRate;
+    // チャンクの代表正答率
+    let currentAccuracyRate = 0;
+    if (fullHistory.length > 0) {
+      currentAccuracyRate = fullHistory[fullHistory.length - 1].accuracyRate;
+    } else if (drillHistory.length > 0) {
+      currentAccuracyRate = drillHistory[drillHistory.length - 1].accuracyRate;
     } else if (totalAttempts > 0) {
-      currentMistakeRate = Math.round((mistakeCount / totalAttempts) * 100) / 100;
+      currentAccuracyRate = Math.round((correctCount / totalAttempts) * 100);
     }
 
-    // needsAttention 判定
+    // needsAttention 判定 (正答率が70%未満、または直近のテストが低スコア)
     let needsAttention = false;
-    if (history.length === 1) {
-      needsAttention = history[0].mistakeRate > 0.3;
-    } else if (history.length >= 2) {
-      const recent2 = history.slice(-2);
-      const avg = (recent2[0].mistakeRate + recent2[1].mistakeRate) / 2;
-      needsAttention = avg > 0.3;
+    if (fullHistory.length > 0) {
+      const recent = fullHistory.slice(-2);
+      const avg = recent.reduce((sum, p) => sum + p.accuracyRate, 0) / recent.length;
+      needsAttention = avg < 70;
+    } else if (totalAttempts > 0) {
+      needsAttention = currentAccuracyRate < 70;
     }
 
     // 間違えた単語リストの集約
@@ -177,9 +217,10 @@ export async function computeChunkStats(
       rangeEnd: assignment.range_end,
       originDate: assignment.date,
       totalAttempts,
-      mistakeCount,
-      mistakeRate: currentMistakeRate,
-      history,
+      correctCount,
+      accuracyRate: currentAccuracyRate,
+      fullHistory,
+      drillHistory,
       needsAttention,
       mistakeWords,
     };

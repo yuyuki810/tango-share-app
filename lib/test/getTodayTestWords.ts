@@ -15,7 +15,7 @@ export interface ReviewChunkSummaryInfo {
   rangeStart: number;
   rangeEnd: number;
   originDate: string;
-  prevMistakeRate: number | null;
+  prevAccuracyRate: number | null; // 0..100 (%)
 }
 
 export interface TodayTestContext {
@@ -94,7 +94,7 @@ export async function getTodayTestContext(
 
       reviewChunks = pList.map((p) => {
         const cAnswers = answersByChunk.get(p.id) ?? [];
-        let prevMistakeRate: number | null = null;
+        let prevAccuracyRate: number | null = null;
         if (cAnswers.length > 0) {
           const sessionGroups = new Map<string, typeof cAnswers>();
           cAnswers.forEach((ans) => {
@@ -104,8 +104,8 @@ export async function getTodayTestContext(
           });
           const lastSessionAnswers = Array.from(sessionGroups.values()).pop();
           if (lastSessionAnswers && lastSessionAnswers.length > 0) {
-            const mistakes = lastSessionAnswers.filter((a) => !a.is_known).length;
-            prevMistakeRate = Math.round((mistakes / lastSessionAnswers.length) * 100) / 100;
+            const corrects = lastSessionAnswers.filter((a) => a.is_known).length;
+            prevAccuracyRate = Math.round((corrects / lastSessionAnswers.length) * 100);
           }
         }
         return {
@@ -113,7 +113,7 @@ export async function getTodayTestContext(
           rangeStart: p.range_start,
           rangeEnd: p.range_end,
           originDate: p.date,
-          prevMistakeRate,
+          prevAccuracyRate,
         };
       });
     }
