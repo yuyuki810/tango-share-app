@@ -31,46 +31,49 @@ export interface ChunkStat {
   mistakeWords: ChunkMistakeWord[];
 }
 
+/**
+ * 弱点マップ統計の計算 (全クエリを完全並列実行して高速化)
+ */
 export async function computeChunkStats(
   supabase: SupabaseClient,
   userId: string,
   wordbookId: string
 ): Promise<ChunkStat[]> {
-  // 1. 対象ユーザー・単語帳の「進める日 (is_review_day = false)」の daily_assignments を取得
-  const { data: assignments, error: assignError } = await supabase
-    .from('daily_assignments')
-    .select('id, range_start, range_end, date')
-    .eq('user_id', userId)
-    .eq('wordbook_id', wordbookId)
-    .eq('is_review_day', false)
-    .order('date', { ascending: true });
+  // 1. assignments, words, sessions を 1 回の並列ラウンドトリップで一括取得
+  const [assignRes, wordsRes, sessionsRes] = await Promise.all([
+    supabase
+      .from('daily_assignments')
+      .select('id, range_start, range_end, date')
+      .eq('user_id', userId)
+      .eq('wordbook_id', wordbookId)
+      .eq('is_review_day', false)
+      .order('date', { ascending: true }),
+    supabase
+      .from('words')
+      .select('id, word, pronunciation, meaning, number')
+      .eq('wordbook_id', wordbookId),
+    supabase
+      .from('test_sessions')
+      .select('id, date, type, completed_at, created_at, test_answers(id, is_known, origin_daily_assignment_id, word_id, created_at)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true }),
+  ]);
 
-  if (assignError || !assignments || assignments.length === 0) {
+  const assignments = assignRes.data ?? [];
+  const words = wordsRes.data ?? [];
+  const sessions = sessionsRes.data ?? [];
+
+  if (assignments.length === 0 || words.length === 0) {
     return [];
   }
 
-  // 2. 単語帳の全単語情報を取得
-  const { data: words, error: wordsError } = await supabase
-    .from('words')
-    .select('id, word, pronunciation, meaning, number')
-    .eq('wordbook_id', wordbookId);
-
-  if (wordsError || !words || words.length === 0) {
-    return [];
-  }
-
+  // 単語マップ構築 (メモリ参照 O(1))
   const wordMap = new Map<string, (typeof words)[0]>();
   words.forEach((w) => {
     wordMap.set(w.id, w);
   });
 
-  // 3. ユーザーの全回答履歴を取得
-  const { data: sessions } = await supabase
-    .from('test_sessions')
-    .select('id, date, type, completed_at, created_at, test_answers(id, is_known, origin_daily_assignment_id, word_id, created_at)')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
-
+  // 全回答フラット化
   const allAnswers: Array<{
     id: string;
     is_known: boolean;
@@ -82,7 +85,7 @@ export async function computeChunkStats(
     created_at: string;
   }> = [];
 
-  (sessions ?? []).forEach((s: any) => {
+  sessions.forEach((s: any) => {
     const answersList = s.test_answers ?? [];
     answersList.forEach((a: any) => {
       allAnswers.push({
@@ -98,7 +101,7 @@ export async function computeChunkStats(
     });
   });
 
-  // 4. 各チャンクごとに集計
+  // 各チャンクごとに集計
   return assignments.map((assignment) => {
     const chunkWordCount = assignment.range_end - assignment.range_start + 1;
 
@@ -113,7 +116,7 @@ export async function computeChunkStats(
     const totalAttempts = chunkAnswers.length;
     const correctCount = chunkAnswers.filter((a) => a.is_known).length;
 
-    // history: テストセッションごとにグルーピング
+    // history: セッションごとにグルーピング
     const sessionMap = new Map<
       string,
       { date: string; created_at: string; type: string; answers: typeof chunkAnswers }
@@ -162,7 +165,7 @@ export async function computeChunkStats(
       }
     });
 
-    // チャンクの代表正答率
+    // チャンク代表正答率 (全体テストの履歴を最優先)
     let currentAccuracyRate = 0;
     if (fullHistory.length > 0) {
       currentAccuracyRate = fullHistory[fullHistory.length - 1].accuracyRate;
@@ -172,7 +175,7 @@ export async function computeChunkStats(
       currentAccuracyRate = Math.round((correctCount / totalAttempts) * 100);
     }
 
-    // needsAttention 判定 (正答率が70%未満、または直近のテストが低スコア)
+    // 要注意判定 (正答率が70%未満、または直近のテストが低スコア)
     let needsAttention = false;
     if (fullHistory.length > 0) {
       const recent = fullHistory.slice(-2);

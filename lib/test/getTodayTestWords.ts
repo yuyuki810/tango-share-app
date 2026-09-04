@@ -33,6 +33,7 @@ export async function getTodayTestContext(
   userId: string,
   today: string
 ): Promise<TodayTestContext | null> {
+  // 1. 今日の割当を取得
   const { data: assignment } = await supabase
     .from('daily_assignments')
     .select('id, wordbook_id, range_start, range_end, is_review_day')
@@ -42,7 +43,8 @@ export async function getTodayTestContext(
 
   if (!assignment) return null;
 
-  const { data: words } = await supabase
+  // 2. 単語リスト取得と復習日割当取得を並列実行
+  const wordsPromise = supabase
     .from('words')
     .select('id, word, pronunciation, meaning, number')
     .eq('wordbook_id', assignment.wordbook_id)
@@ -50,73 +52,80 @@ export async function getTodayTestContext(
     .lte('number', assignment.range_end)
     .order('number', { ascending: true });
 
-  const wordList = words ?? [];
-  const studyCounts = await getStudyCounts(
-    supabase,
-    userId,
-    wordList.map((w) => w.id)
-  );
+  const progressPromise = assignment.is_review_day
+    ? supabase
+        .from('daily_assignments')
+        .select('id, range_start, range_end, date')
+        .eq('user_id', userId)
+        .eq('wordbook_id', assignment.wordbook_id)
+        .eq('is_review_day', false)
+        .gte('range_start', assignment.range_start)
+        .lte('range_end', assignment.range_end)
+        .order('range_start', { ascending: true })
+    : Promise.resolve({ data: [] });
+
+  const [wordsRes, progressRes] = await Promise.all([wordsPromise, progressPromise]);
+
+  const wordList = wordsRes.data ?? [];
+  const pList = progressRes.data ?? [];
+  const wordIds = wordList.map((w) => w.id);
+  const pIds = pList.map((p) => p.id);
+
+  // 3. 学習回数集計と復習日過去回答取得を並列実行
+  const studyCountsPromise = getStudyCounts(supabase, userId, wordIds);
+  const prevAnswersPromise =
+    pIds.length > 0
+      ? supabase
+          .from('test_answers')
+          .select('is_known, origin_daily_assignment_id, created_at, session_id, test_sessions!inner(user_id, date, created_at)')
+          .eq('test_sessions.user_id', userId)
+          .in('origin_daily_assignment_id', pIds)
+          .order('created_at', { ascending: true })
+      : Promise.resolve({ data: [] });
+
+  const [studyCounts, prevAnswersRes] = await Promise.all([studyCountsPromise, prevAnswersPromise]);
 
   let reviewChunks: ReviewChunkSummaryInfo[] | undefined;
   const chunkByRange: Array<{ id: string; range_start: number; range_end: number; date: string }> = [];
 
-  if (assignment.is_review_day) {
-    const { data: progressAssignments } = await supabase
-      .from('daily_assignments')
-      .select('id, range_start, range_end, date')
-      .eq('user_id', userId)
-      .eq('wordbook_id', assignment.wordbook_id)
-      .eq('is_review_day', false)
-      .gte('range_start', assignment.range_start)
-      .lte('range_end', assignment.range_end)
-      .order('range_start', { ascending: true });
-
-    const pList = progressAssignments ?? [];
+  if (assignment.is_review_day && pList.length > 0) {
     chunkByRange.push(...pList);
 
-    if (pList.length > 0) {
-      const pIds = pList.map((p) => p.id);
-      const { data: prevAnswers } = await supabase
-        .from('test_answers')
-        .select('is_known, origin_daily_assignment_id, created_at, session_id, test_sessions!inner(user_id, date, created_at)')
-        .eq('test_sessions.user_id', userId)
-        .in('origin_daily_assignment_id', pIds)
-        .order('created_at', { ascending: true });
+    const prevAnswers = prevAnswersRes.data ?? [];
+    const answersByChunk = new Map<string, Array<{ is_known: boolean; sessionId: string; created_at: string }>>();
 
-      const answersByChunk = new Map<string, Array<{ is_known: boolean; sessionId: string; created_at: string }>>();
-      (prevAnswers ?? []).forEach((a) => {
-        const cid = a.origin_daily_assignment_id;
-        if (!cid) return;
-        const list = answersByChunk.get(cid) ?? [];
-        list.push({ is_known: a.is_known, sessionId: a.session_id, created_at: a.created_at });
-        answersByChunk.set(cid, list);
-      });
+    prevAnswers.forEach((a) => {
+      const cid = a.origin_daily_assignment_id;
+      if (!cid) return;
+      const list = answersByChunk.get(cid) ?? [];
+      list.push({ is_known: a.is_known, sessionId: a.session_id, created_at: a.created_at });
+      answersByChunk.set(cid, list);
+    });
 
-      reviewChunks = pList.map((p) => {
-        const cAnswers = answersByChunk.get(p.id) ?? [];
-        let prevAccuracyRate: number | null = null;
-        if (cAnswers.length > 0) {
-          const sessionGroups = new Map<string, typeof cAnswers>();
-          cAnswers.forEach((ans) => {
-            const list = sessionGroups.get(ans.sessionId) ?? [];
-            list.push(ans);
-            sessionGroups.set(ans.sessionId, list);
-          });
-          const lastSessionAnswers = Array.from(sessionGroups.values()).pop();
-          if (lastSessionAnswers && lastSessionAnswers.length > 0) {
-            const corrects = lastSessionAnswers.filter((a) => a.is_known).length;
-            prevAccuracyRate = Math.round((corrects / lastSessionAnswers.length) * 100);
-          }
+    reviewChunks = pList.map((p) => {
+      const cAnswers = answersByChunk.get(p.id) ?? [];
+      let prevAccuracyRate: number | null = null;
+      if (cAnswers.length > 0) {
+        const sessionGroups = new Map<string, typeof cAnswers>();
+        cAnswers.forEach((ans) => {
+          const list = sessionGroups.get(ans.sessionId) ?? [];
+          list.push(ans);
+          sessionGroups.set(ans.sessionId, list);
+        });
+        const lastSessionAnswers = Array.from(sessionGroups.values()).pop();
+        if (lastSessionAnswers && lastSessionAnswers.length > 0) {
+          const corrects = lastSessionAnswers.filter((a) => a.is_known).length;
+          prevAccuracyRate = Math.round((corrects / lastSessionAnswers.length) * 100);
         }
-        return {
-          chunkId: p.id,
-          rangeStart: p.range_start,
-          rangeEnd: p.range_end,
-          originDate: p.date,
-          prevAccuracyRate,
-        };
-      });
-    }
+      }
+      return {
+        chunkId: p.id,
+        rangeStart: p.range_start,
+        rangeEnd: p.range_end,
+        originDate: p.date,
+        prevAccuracyRate,
+      };
+    });
   }
 
   const cards: TestWordCard[] = wordList.map((w) => {
