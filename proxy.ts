@@ -1,10 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-/**
- * Next.js 16 proxy: Supabase Auth セッションリフレッシュ処理
- */
 export async function proxy(request: NextRequest) {
+  // 1. Next.js のリンクプリフェッチリクエスト時は Supabase 通信をスキップして即レスポンス
+  if (
+    request.headers.get("x-middleware-prefetch") ||
+    request.headers.get("purpose") === "prefetch"
+  ) {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -15,6 +20,12 @@ export async function proxy(request: NextRequest) {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
+    return response;
+  }
+
+  // 2. 認証クッキーが存在しない場合は無駄なネットワーク往復をスキップ
+  const authCookie = request.cookies.getAll().find((c) => c.name.includes("-auth-token"));
+  if (!authCookie) {
     return response;
   }
 
@@ -39,7 +50,7 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  // セッションの有効期限を自動更新
+  // セッション更新
   await supabase.auth.getUser();
 
   return response;

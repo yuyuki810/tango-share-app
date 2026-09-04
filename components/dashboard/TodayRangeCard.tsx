@@ -84,6 +84,7 @@ export function TodayRangeCard({
             <>
               <Link
                 href="/test?mode=daily_check"
+                prefetch={true}
                 className={`flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl font-mincho text-base font-bold text-paper shadow-md transition active:scale-98 hover:opacity-95 ${
                   hasIncompleteSession ? 'bg-amber-700 shadow-amber-700/20' : 'bg-akashiito shadow-akashiito/20'
                 }`}
@@ -94,6 +95,7 @@ export function TodayRangeCard({
               <div className="text-center pt-1">
                 <Link
                   href="/test?mode=normal"
+                  prefetch={true}
                   className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl border border-dashed border-line bg-paper/60 px-4 py-2.5 font-maru text-xs font-medium text-ink/70 transition hover:bg-paper hover:text-ink active:scale-98"
                 >
                   本番前の練習テストを受ける（何度でも可能）
@@ -108,6 +110,7 @@ export function TodayRangeCard({
               </div>
               <Link
                 href="/test?mode=normal"
+                prefetch={true}
                 className="flex min-h-[48px] w-full items-center justify-center rounded-2xl border border-line bg-paper font-mincho text-sm font-bold text-ink transition hover:bg-paper-hover active:scale-98"
               >
                 練習テストを受ける（再復習）

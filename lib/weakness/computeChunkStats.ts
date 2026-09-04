@@ -12,7 +12,7 @@ export interface ChunkMistakeWord {
 
 export interface ChunkHistoryPoint {
   testDate: string;
-  accuracyRate: number; // 0..100 (%)
+  accuracyRate: number;
   correctCount: number;
   totalCount: number;
 }
@@ -24,23 +24,20 @@ export interface ChunkStat {
   originDate: string;
   totalAttempts: number;
   correctCount: number;
-  accuracyRate: number; // 0..100 (%)
-  fullHistory: ChunkHistoryPoint[];  // 範囲全体テストの推移
-  drillHistory: ChunkHistoryPoint[]; // 間違えた単語のみの再テスト推移
+  accuracyRate: number;
+  fullHistory: ChunkHistoryPoint[];
+  drillHistory: ChunkHistoryPoint[];
   needsAttention: boolean;
   mistakeWords: ChunkMistakeWord[];
 }
 
-/**
- * 弱点マップ統計の計算 (全クエリを完全並列実行して高速化)
- */
 export async function computeChunkStats(
   supabase: SupabaseClient,
   userId: string,
   wordbookId: string
 ): Promise<ChunkStat[]> {
-  // 1. assignments, words, sessions を 1 回の並列ラウンドトリップで一括取得
-  const [assignRes, wordsRes, sessionsRes] = await Promise.all([
+  // 1. 割当とセッション履歴を並列取得
+  const [assignRes, sessionsRes] = await Promise.all([
     supabase
       .from('daily_assignments')
       .select('id, range_start, range_end, date')
@@ -49,10 +46,6 @@ export async function computeChunkStats(
       .eq('is_review_day', false)
       .order('date', { ascending: true }),
     supabase
-      .from('words')
-      .select('id, word, pronunciation, meaning, number')
-      .eq('wordbook_id', wordbookId),
-    supabase
       .from('test_sessions')
       .select('id, date, type, completed_at, created_at, test_answers(id, is_known, origin_daily_assignment_id, word_id, created_at)')
       .eq('user_id', userId)
@@ -60,16 +53,26 @@ export async function computeChunkStats(
   ]);
 
   const assignments = assignRes.data ?? [];
-  const words = wordsRes.data ?? [];
   const sessions = sessionsRes.data ?? [];
 
-  if (assignments.length === 0 || words.length === 0) {
+  if (assignments.length === 0) {
     return [];
   }
 
-  // 単語マップ構築 (メモリ参照 O(1))
-  const wordMap = new Map<string, (typeof words)[0]>();
-  words.forEach((w) => {
+  // 2. ユーザーの学習範囲に必要な単語のみに絞り込んで取得 (1900語全件取得を廃止して軽量化)
+  const minNum = Math.min(...assignments.map((a) => a.range_start));
+  const maxNum = Math.max(...assignments.map((a) => a.range_end));
+
+  const { data: words } = await supabase
+    .from('words')
+    .select('id, word, pronunciation, meaning, number')
+    .eq('wordbook_id', wordbookId)
+    .gte('number', minNum)
+    .lte('number', maxNum);
+
+  const wordList = words ?? [];
+  const wordMap = new Map<string, (typeof wordList)[0]>();
+  wordList.forEach((w) => {
     wordMap.set(w.id, w);
   });
 
@@ -101,7 +104,6 @@ export async function computeChunkStats(
     });
   });
 
-  // 各チャンクごとに集計
   return assignments.map((assignment) => {
     const chunkWordCount = assignment.range_end - assignment.range_start + 1;
 
@@ -116,7 +118,6 @@ export async function computeChunkStats(
     const totalAttempts = chunkAnswers.length;
     const correctCount = chunkAnswers.filter((a) => a.is_known).length;
 
-    // history: セッションごとにグルーピング
     const sessionMap = new Map<
       string,
       { date: string; created_at: string; type: string; answers: typeof chunkAnswers }
@@ -147,7 +148,6 @@ export async function computeChunkStats(
       const sCorrect = s.answers.filter((a) => a.is_known).length;
       const accuracyRate = sTotal > 0 ? Math.round((sCorrect / sTotal) * 100) : 0;
 
-      // 範囲全体テスト (daily_check または チャンク総単語数の70%以上) vs 苦手克服ドリル
       const isFullScope =
         s.type === 'daily_check' || sTotal >= Math.min(Math.ceil(chunkWordCount * 0.7), chunkWordCount);
 
@@ -165,7 +165,6 @@ export async function computeChunkStats(
       }
     });
 
-    // チャンク代表正答率 (全体テストの履歴を最優先)
     let currentAccuracyRate = 0;
     if (fullHistory.length > 0) {
       currentAccuracyRate = fullHistory[fullHistory.length - 1].accuracyRate;
@@ -175,7 +174,6 @@ export async function computeChunkStats(
       currentAccuracyRate = Math.round((correctCount / totalAttempts) * 100);
     }
 
-    // 要注意判定 (正答率が70%未満、または直近のテストが低スコア)
     let needsAttention = false;
     if (fullHistory.length > 0) {
       const recent = fullHistory.slice(-2);
@@ -185,7 +183,6 @@ export async function computeChunkStats(
       needsAttention = currentAccuracyRate < 70;
     }
 
-    // 間違えた単語リストの集約
     const wordStatsMap = new Map<string, { mistakes: number; total: number }>();
     chunkAnswers.forEach((a) => {
       const cur = wordStatsMap.get(a.word_id) ?? { mistakes: 0, total: 0 };

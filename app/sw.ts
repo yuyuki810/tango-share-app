@@ -16,15 +16,18 @@ const serwist = new Serwist({
   clientsClaim: true,
   navigationPreload: true,
   runtimeCaching: [
+    // 1. API ルートおよび Next.js App Router の RSC ペイロードはキャッシュ待機せずダイレクト通信
     {
-      matcher: ({ url }) => url.pathname.startsWith("/api/"),
+      matcher: ({ url }) =>
+        url.pathname.startsWith("/api/") || url.searchParams.has("_rsc"),
       handler: new NetworkOnly(),
     },
+    // 2. ページ全体の初期読み込み: 短いタイムアウト (1.2s) で即座にフォールバック
     {
       matcher: ({ request }) => request.mode === "navigate",
       handler: new NetworkFirst({
         cacheName: "pages-cache",
-        networkTimeoutSeconds: 3,
+        networkTimeoutSeconds: 1.2,
       }),
     },
     ...defaultCache,
