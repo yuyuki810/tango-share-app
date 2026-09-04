@@ -11,12 +11,23 @@ import { TestSessionRunner } from '@/components/test/TestSessionRunner';
 import { CheckCircle2 } from 'lucide-react';
 
 interface TestPageProps {
-  searchParams: Promise<{ mode?: string; originAssignmentId?: string; weak?: string }>;
+  searchParams: Promise<{
+    mode?: string;
+    originAssignmentId?: string;
+    weak?: string;
+    filter?: 'all' | 'mistakes' | 'recent';
+    limit?: string;
+    days?: string;
+  }>;
 }
 
 export default async function TestPage({ searchParams }: TestPageProps) {
   const params = await searchParams;
   const sessionType = params.mode === 'daily_check' ? 'daily_check' : 'normal';
+
+  const filterMode = params.filter || 'all';
+  const filterLimit = params.limit ? Number(params.limit) : undefined;
+  const filterDays = params.days ? Number(params.days) : undefined;
 
   const supabase = await createClient();
   const {
@@ -38,12 +49,15 @@ export default async function TestPage({ searchParams }: TestPageProps) {
   if (params.originAssignmentId) {
     const weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {
       chunkId: params.originAssignmentId,
+      filterMode,
+      limit: filterLimit,
+      days: filterDays,
     });
 
     if (weakCards.length === 0) {
       return (
         <main className="mx-auto flex h-[80vh] max-w-md md:max-w-xl flex-col items-center justify-center gap-4 px-4 text-center">
-          <p className="font-mincho text-lg text-ink">この範囲に苦手な単語はありません！</p>
+          <p className="font-mincho text-lg text-ink">条件に該当する苦手な単語はありません！</p>
           <p className="font-maru text-xs text-ink/60">しっかり定着しています。次の学習に進みましょう。</p>
           <Link
             href="/weakness"
@@ -69,12 +83,16 @@ export default async function TestPage({ searchParams }: TestPageProps) {
 
   // 2. 単語帳全体の苦手克服テスト
   if (params.weak === 'true') {
-    const weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id);
+    const weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {
+      filterMode,
+      limit: filterLimit,
+      days: filterDays,
+    });
 
     if (weakCards.length === 0) {
       return (
         <main className="mx-auto flex h-[80vh] max-w-md md:max-w-xl flex-col items-center justify-center gap-4 px-4 text-center">
-          <p className="font-mincho text-lg text-ink">現在、苦手な単語はありません！</p>
+          <p className="font-mincho text-lg text-ink">条件に該当する苦手な単語はありません！</p>
           <p className="font-maru text-xs text-ink/60">日々の学習が成果に繋がっています。</p>
           <Link
             href="/dashboard"
@@ -100,7 +118,7 @@ export default async function TestPage({ searchParams }: TestPageProps) {
 
   const today = getTodayJST();
 
-  // 3. 本番デイリーチェックの完了済み重複受験ガード (completed_at がある場合のみブロック)
+  // 3. 本番デイリーチェックの完了済み重複受験ガード
   if (sessionType === 'daily_check') {
     const { data: existingSession } = await supabase
       .from('test_sessions')
@@ -110,7 +128,6 @@ export default async function TestPage({ searchParams }: TestPageProps) {
       .eq('type', 'daily_check')
       .maybeSingle();
 
-    // 既に完了している場合のみブロック画面を表示 (未完了の場合はTestSessionRunnerで再開)
     if (existingSession && existingSession.completed_at) {
       return (
         <main className="mx-auto flex h-[80vh] max-w-md md:max-w-xl flex-col items-center justify-center gap-4 px-4 text-center">

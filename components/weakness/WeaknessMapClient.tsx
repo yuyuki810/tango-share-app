@@ -1,11 +1,12 @@
-"use client";
+'use client';
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import type { ChunkStat } from '@/lib/weakness/computeChunkStats';
 import { WeaknessChunkTile } from './WeaknessChunkTile';
 import { WeaknessBottomSheet } from './WeaknessBottomSheet';
+import { DrillFilterDialog } from './DrillFilterDialog';
 
 interface WeaknessMapClientProps {
   chunks: ChunkStat[];
@@ -14,6 +15,7 @@ interface WeaknessMapClientProps {
 
 export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientProps) {
   const [selectedChunk, setSelectedChunk] = useState<ChunkStat | null>(null);
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
   const totalChunks = chunks.length;
   const attentionCount = chunks.filter((c) => c.needsAttention).length;
@@ -24,22 +26,24 @@ export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientPro
       <div>
         <Link
           href="/dashboard"
-          className="inline-flex items-center text-xs font-semibold text-ink-muted hover:text-ink transition-colors"
+          prefetch={true}
+          className="inline-flex min-h-[44px] items-center text-xs font-semibold text-ink-muted hover:text-ink transition-colors"
         >
           <ChevronLeft className="h-4 w-4 mr-0.5" />
           ダッシュボードへ戻る
         </Link>
 
-        <div className="mt-4 flex items-center justify-between">
+        <div className="mt-2 flex items-center justify-between">
           <div>
-            <h1 className="font-mincho text-2xl font-bold text-ink">弱点マップ</h1>
-            <p className="font-maru text-xs text-ink/50 mt-0.5">
+            <h1 className="font-mincho text-2xl md:text-3xl font-bold text-ink">弱点マップ</h1>
+            <p className="font-maru text-xs md:text-sm text-ink/50 mt-0.5">
               {wordbookName || '単語帳'} の進度と定着傾向
             </p>
           </div>
         </div>
       </div>
 
+      {/* 3つの統計サマリーカード */}
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-2xl border border-line bg-white p-3 text-center shadow-xs">
           <span className="block font-maru text-[10px] text-ink/50">総学習範囲</span>
@@ -60,9 +64,10 @@ export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientPro
         </div>
       </div>
 
+      {/* タイル一覧 */}
       <section className="space-y-2">
         <div className="flex items-center justify-between px-1">
-          <h2 className="font-mincho text-xs font-bold text-ink/60">学習範囲タイル一覧</h2>
+          <h2 className="font-mincho text-xs md:text-sm font-bold text-ink/60">学習範囲タイル一覧</h2>
           <span className="font-maru text-[10px] text-ink/40">タップして詳細・単語を確認</span>
         </div>
 
@@ -86,18 +91,29 @@ export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientPro
         )}
       </section>
 
+      {/* 苦手克服テスト開始ボタン */}
       <div className="pt-2">
-        <Link
-          href="/test?mode=normal&weak=true"
-          className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90"
+        <button
+          type="button"
+          onClick={() => setIsFilterDialogOpen(true)}
+          className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90 cursor-pointer"
         >
-          単語帳全体の苦手克服テストを始める
-        </Link>
+          <SlidersHorizontal className="h-4 w-4" />
+          <span>単語帳全体の苦手克服テストを始める</span>
+        </button>
       </div>
 
+      {/* 詳細ボトムシート */}
       <WeaknessBottomSheet
         chunk={selectedChunk}
         onClose={() => setSelectedChunk(null)}
+      />
+
+      {/* 全体用絞り込みダイアログ */}
+      <DrillFilterDialog
+        isOpen={isFilterDialogOpen}
+        onClose={() => setIsFilterDialogOpen(false)}
+        title="単語帳全体の苦手克服テスト"
       />
     </div>
   );
