@@ -9,10 +9,19 @@
   --color-ink-muted: var(--color-ink-muted-val);
   --color-ink-subtle: var(--color-ink-subtle-val);
 
-  --color-akashiito: var(--color-akashiito-val);
-  --color-akashiito-hover: var(--color-akashiito-hover-val);
+  /* 赤シート・重要CTA専用 (ブランド核) */
+  --color-akashiito: #E24B4A;
+  --color-akashiito-hover: #C9382E;
   --color-akashiito-subtle: var(--color-akashiito-subtle-val);
   --color-akashiito-border: var(--color-akashiito-border-val);
+
+  /* 新セマンティックカラー */
+  --color-amber-status: #EF9F27;     /* 未完了ステータス (琥珀) */
+  --color-streak-pink: #F4C0D1;      /* ストリーク連続日数 (ピンク) */
+  --color-review-teal: #9FE1CB;      /* 復習日・見直し (ミントティール) */
+  --color-today-blue: #378ADD;       /* 本日・当日枠 (青) */
+  --color-chart-total: #639922;      /* 全体正答率グラフ (緑) */
+  --color-chart-drill: #7F77DD;      /* 苦手克服グラフ (紫) */
 
   --color-highlighter: var(--color-highlighter-val);
   --color-highlighter-subtle: var(--color-highlighter-subtle-val);
@@ -25,7 +34,7 @@
   --font-number: var(--font-zen-maru), sans-serif;
 
   --shadow-paper: 0 2px 8px -2px rgba(35, 42, 59, 0.05), 0 1px 3px -1px rgba(35, 42, 59, 0.05);
-  --shadow-sheet: 0 8px 24px -6px rgba(226, 72, 61, 0.12);
+  --shadow-sheet: 0 8px 24px -6px rgba(226, 75, 74, 0.12);
 }
 
 /* 🍵 既定テーマ: 和紙 (Washi) */
@@ -38,8 +47,6 @@
   --color-ink-muted-val: #626B7F;
   --color-ink-subtle-val: #8D95A5;
 
-  --color-akashiito-val: #E2483D;
-  --color-akashiito-hover-val: #C9382E;
   --color-akashiito-subtle-val: #FDF2F1;
   --color-akashiito-border-val: #F7B8B3;
 
@@ -60,8 +67,6 @@
   --color-ink-muted-val: #B3A7C7;
   --color-ink-subtle-val: #7E7196;
 
-  --color-akashiito-val: #FF5353;
-  --color-akashiito-hover-val: #E03E3E;
   --color-akashiito-subtle-val: #2E151A;
   --color-akashiito-border-val: #6E2228;
 
@@ -88,7 +93,7 @@
   }
 
   ::selection {
-    background-color: rgba(245, 200, 76, 0.3);
+    background-color: rgba(244, 192, 209, 0.3);
   }
 
   :focus-visible {

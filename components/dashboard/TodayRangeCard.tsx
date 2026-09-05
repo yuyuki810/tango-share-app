@@ -33,28 +33,34 @@ export function TodayRangeCard({
           <h2 className="mt-1 font-mincho text-xl font-bold text-ink">今日の学習ノルマ</h2>
         </div>
         <div className="flex flex-col items-end gap-1">
+          {/* 総復習の日バッジ: ミント寄りのティール (#9FE1CB / #136C56) */}
           {hasRange && (
             <span
               className={`rounded-full border px-3 py-0.5 font-maru text-xs font-bold shadow-xs ${
                 isReviewDay
-                  ? 'border-highlighter bg-highlighter/50 text-ink'
+                  ? 'border-[#9FE1CB] bg-[#E6F7F2] text-[#136C56]'
                   : 'border-line bg-paper text-ink/80'
               }`}
             >
               {isReviewDay ? '総復習の日' : '新規進捗'}
             </span>
           )}
+          {/* 未完了ステータスバッジ: 琥珀 (#EF9F27 / #9A5B00) */}
           {hasRange && (
             <span
               className={`rounded-full px-2.5 py-0.5 font-maru text-[10px] font-bold border ${
                 isDailyCheckCompleted
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                   : hasIncompleteSession
-                  ? 'bg-amber-50 text-amber-900 border-amber-300'
-                  : 'bg-akashiito/10 text-akashiito border-akashiito-border'
+                  ? 'bg-[#FEF3E2] text-[#9A5B00] border-[#EF9F27]'
+                  : 'bg-[#FEF3E2] text-[#9A5B00] border-[#EF9F27]'
               }`}
             >
-              {isDailyCheckCompleted ? '本番チェック: 済' : hasIncompleteSession ? '本番チェック: 中断中' : '本番チェック: 未'}
+              {isDailyCheckCompleted
+                ? '本番チェック: 済'
+                : hasIncompleteSession
+                ? '本番チェック: 中断中'
+                : '本番チェック: 未'}
             </span>
           )}
         </div>
@@ -82,12 +88,11 @@ export function TodayRangeCard({
         <div className="space-y-2.5">
           {!isDailyCheckCompleted ? (
             <>
+              {/* 本番チェックCTAボタン: 赤 #E24B4A を温存 */}
               <Link
                 href="/test?mode=daily_check"
                 prefetch={true}
-                className={`flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl font-mincho text-base font-bold text-paper shadow-md transition active:scale-98 hover:opacity-95 ${
-                  hasIncompleteSession ? 'bg-amber-700 shadow-amber-700/20' : 'bg-akashiito shadow-akashiito/20'
-                }`}
+                className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-[#E24B4A] font-mincho text-base font-bold text-white shadow-md shadow-[#E24B4A]/25 transition active:scale-98 hover:opacity-95"
               >
                 {hasIncompleteSession && <RotateCcw className="h-4 w-4" />}
                 <span>{hasIncompleteSession ? '前回の続きから再開する' : '今日の本番チェックを受ける'}</span>
@@ -104,7 +109,7 @@ export function TodayRangeCard({
             </>
           ) : (
             <>
-              <div className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 py-3 text-emerald-800">
+              <div className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-300 py-3 text-emerald-800">
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
                 <span className="font-mincho text-sm font-bold">本日の本番チェックは受験済みです</span>
               </div>

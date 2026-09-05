@@ -25,7 +25,7 @@ export default async function DashboardPage() {
   const prevWeekStartDate = getPreviousSaturday(weekStartDate);
   const weekDates = getWeekDates(weekStartDate);
 
-  // [全クエリを並列実行] 画面ロード時間を1/4に短縮
+  // [全クエリを並列実行]
   const [
     profileRes,
     weekSessionsRes,
@@ -128,11 +128,13 @@ export default async function DashboardPage() {
         <div className="flex items-center gap-2">
           <Link
             href="/debug"
+            prefetch={true}
             className="rounded-full border border-line bg-white px-2.5 py-1 font-maru text-[10px] md:text-xs text-ink/60 hover:text-ink transition"
           >
             🔍 自己診断
           </Link>
-          <div className="flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 font-maru text-xs md:text-sm font-bold text-amber-900 shadow-2xs">
+          {/* ストリークバッジ: ピンク (#F4C0D1 / #9D2248) で分離 */}
+          <div className="flex items-center gap-1.5 rounded-full border border-[#F4C0D1] bg-[#FDF2F5] px-3 py-1 font-maru text-xs md:text-sm font-bold text-[#9D2248] shadow-2xs">
             <span>🔥</span>
             <span>{currentStreak}日連続</span>
           </div>
@@ -165,6 +167,7 @@ export default async function DashboardPage() {
           <h2 className="font-mincho text-xs md:text-sm font-bold text-ink/60">今週のスケジュール (土〜金)</h2>
           <Link
             href="/weakness"
+            prefetch={true}
             className="inline-flex min-h-[44px] items-center gap-1 px-2 font-maru text-xs md:text-sm font-bold text-ink/70 transition hover:text-ink underline decoration-line underline-offset-4"
           >
             <span>弱点マップを見る</span>

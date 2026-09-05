@@ -17,13 +17,15 @@ function formatDateLabel(dateStr: string): string {
   return `${m}/${d}`;
 }
 
-// 共通SVG折れ線グラフコンポーネント (正答率 0〜100% 描画)
+// グラフ①: 全体正答率 (緑 #639922) / グラフ②: 苦手克服 (紫 #7F77DD) 描画
 function AccuracyLineChart({
   points,
   emptyMessage,
+  color = '#639922',
 }: {
   points: ChunkHistoryPoint[];
   emptyMessage: string;
+  color?: string;
 }) {
   const chartWidth = 320;
   const chartHeight = 70;
@@ -80,6 +82,7 @@ function AccuracyLineChart({
   return (
     <div className="py-1">
       <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-20 w-full overflow-visible">
+        {/* 目安線 (100%, 50%, 0%) */}
         <line
           x1={paddingX}
           y1={paddingY}
@@ -111,7 +114,7 @@ function AccuracyLineChart({
           <path
             d={pathD}
             fill="none"
-            stroke="#232A3B"
+            stroke={color}
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -120,8 +123,8 @@ function AccuracyLineChart({
 
         {renderedPoints.map((p, i) => (
           <g key={i}>
-            <circle cx={p.x} cy={p.y} r="4" fill="#232A3B" stroke="#FFFFFF" strokeWidth="2" />
-            <text x={p.x} y={p.y - 7} textAnchor="middle" className="fill-ink text-[10px] font-bold font-number">
+            <circle cx={p.x} cy={p.y} r="4" fill={color} stroke="#FFFFFF" strokeWidth="2" />
+            <text x={p.x} y={p.y - 7} textAnchor="middle" style={{ fill: color }} className="text-[10px] font-bold font-number">
               {p.rate}%
             </text>
             <text x={p.x} y={chartHeight + 1} textAnchor="middle" className="fill-ink/40 text-[9px] font-maru">
@@ -224,34 +227,42 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
               </div>
             </div>
 
-            {/* グラフ1: 範囲全体テスト */}
+            {/* グラフ1: 範囲全体テスト (緑 #639922) */}
             <div className="rounded-2xl border border-line bg-white p-4 shadow-xs space-y-1">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="font-mincho text-xs font-bold text-ink">1. 全体正答率の推移</span>
-                  <p className="font-maru text-[10px] text-ink/50">※出題範囲全体の習熟度推移 ({chunk.fullHistory.length}回)</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[#639922]" />
+                    <span className="font-mincho text-xs font-bold text-ink">1. 全体正答率の推移</span>
+                  </div>
+                  <p className="font-maru text-[10px] text-ink/50 mt-0.5">※出題範囲全体の習熟度推移 ({chunk.fullHistory.length}回)</p>
                 </div>
                 <span className="font-maru text-[10px] text-ink/40">古い順 → 最新</span>
               </div>
 
               <AccuracyLineChart
                 points={chunk.fullHistory}
+                color="#639922"
                 emptyMessage="まだ範囲全体のテスト履歴がありません"
               />
             </div>
 
-            {/* グラフ2: 苦手克服テスト */}
+            {/* グラフ2: 苦手克服テスト (紫 #7F77DD) */}
             <div className="rounded-2xl border border-line bg-white p-4 shadow-xs space-y-1">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="font-mincho text-xs font-bold text-ink">2. 苦手克服テストの正答率</span>
-                  <p className="font-maru text-[10px] text-ink/50">※母数: 過去に間違えた単語のみ ({chunk.drillHistory.length}回)</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[#7F77DD]" />
+                    <span className="font-mincho text-xs font-bold text-ink">2. 苦手克服テストの正答率</span>
+                  </div>
+                  <p className="font-maru text-[10px] text-ink/50 mt-0.5">※母数: 過去に間違えた単語のみ ({chunk.drillHistory.length}回)</p>
                 </div>
                 <span className="font-maru text-[10px] text-ink/40">古い順 → 最新</span>
               </div>
 
               <AccuracyLineChart
                 points={chunk.drillHistory}
+                color="#7F77DD"
                 emptyMessage="苦手克服テストの履歴はまだありません。下のボタンから特訓できます。"
               />
             </div>

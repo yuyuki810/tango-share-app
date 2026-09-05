@@ -31,21 +31,21 @@ export function WeeklySchedule({ days, todayDate }: WeeklyScheduleProps) {
           const isOff = day.rangeStart === null;
           const isCompleted = !!day.isCompleted;
 
-          // スタイル判定:
-          // 1. 完了日 (今日・過去日): エメラルドグリーン + チェックマーク
-          // 2. 今日の未完了: 赤枠 (要対応)
-          // 3. 復習日 (未完了): ゴールド/ハイライター
+          // 色の役割定義:
+          // 1. 完了日 (今日含む): エメラルドグリーン + チェック
+          // 2. 本日の未完了枠: 中立な青 (#378ADD / #185FA5)
+          // 3. 復習日 (未完了): ミント寄りのティール (#9FE1CB / #136C56)
           // 4. 休み: 薄いグレー
-          // 5. 新規進捗日 (未完了): ペーパー/ライン
+          // 5. 新規進捗日 (未完了): ペーパー
           let dayStyle = 'border-line/80 bg-paper text-ink';
           if (isCompleted) {
             dayStyle = isToday
               ? 'border-emerald-500 bg-emerald-50/80 ring-2 ring-emerald-300 shadow-2xs'
-              : 'border-emerald-200 bg-emerald-50/60 shadow-2xs';
+              : 'border-emerald-300 bg-emerald-50/60 shadow-2xs';
           } else if (isToday) {
-            dayStyle = 'border-akashiito bg-akashiito/5 ring-2 ring-akashiito/30';
+            dayStyle = 'border-[#378ADD] bg-[#EBF4FC] ring-2 ring-[#378ADD]/40';
           } else if (day.isReviewDay) {
-            dayStyle = 'border-highlighter bg-highlighter/30';
+            dayStyle = 'border-[#9FE1CB] bg-[#E6F7F2]';
           } else if (isOff) {
             dayStyle = 'border-line/40 bg-line/20 text-ink/30';
           }
@@ -53,13 +53,17 @@ export function WeeklySchedule({ days, todayDate }: WeeklyScheduleProps) {
           const labelColor = isCompleted
             ? 'text-emerald-800'
             : isToday
-            ? 'text-akashiito'
+            ? 'text-[#185FA5]'
+            : day.isReviewDay
+            ? 'text-[#136C56]'
             : 'text-ink/60';
 
           const dateColor = isCompleted
-            ? 'text-emerald-900 font-bold'
+            ? 'text-emerald-950 font-bold'
             : isToday
-            ? 'text-akashiito font-bold'
+            ? 'text-[#185FA5] font-bold'
+            : day.isReviewDay
+            ? 'text-[#136C56] font-bold'
             : 'text-ink font-bold';
 
           return (
@@ -67,7 +71,7 @@ export function WeeklySchedule({ days, todayDate }: WeeklyScheduleProps) {
               key={day.date}
               className={`relative flex min-h-[82px] flex-col items-center justify-between rounded-2xl border p-1.5 text-center transition ${dayStyle}`}
             >
-              {/* 日付ヘッダー */}
+              {/* 曜日・日付ヘッダー */}
               <div>
                 <span className={`block font-maru text-[11px] font-bold ${labelColor}`}>
                   {DAY_LABELS[i]}
@@ -84,7 +88,7 @@ export function WeeklySchedule({ days, todayDate }: WeeklyScheduleProps) {
                     <Check className="h-3 w-3 stroke-[3]" />
                   </div>
                 ) : day.isReviewDay ? (
-                  <span className="rounded-sm bg-highlighter/60 px-1 py-0.5 text-[9px] font-bold text-ink">
+                  <span className="rounded-sm bg-[#9FE1CB] border border-[#6ECBAE] px-1 py-0.5 text-[9px] font-bold text-[#136C56]">
                     復習
                   </span>
                 ) : isOff ? (
@@ -103,7 +107,7 @@ export function WeeklySchedule({ days, todayDate }: WeeklyScheduleProps) {
                 {isToday ? (
                   <div
                     className={`h-1.5 w-1.5 rounded-full ${
-                      isCompleted ? 'bg-emerald-600' : 'bg-akashiito'
+                      isCompleted ? 'bg-emerald-600' : 'bg-[#378ADD]'
                     }`}
                   />
                 ) : (

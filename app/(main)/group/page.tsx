@@ -30,7 +30,6 @@ export default async function GroupPage() {
     .eq('id', user.id)
     .single();
 
-  // 未所属の場合は、グループ作成または参加フォームを直接表示
   if (!me?.group_id) {
     return (
       <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl px-4 py-8 space-y-6">
@@ -58,7 +57,6 @@ export default async function GroupPage() {
 
   const today = getTodayJST();
 
-  // [並列化 1] グループ情報とメンバー一覧を同時に取得
   const [groupRes, membersRes] = await Promise.all([
     supabase.from('groups').select('id, name, invite_code').eq('id', me.group_id).single(),
     supabase.from('users').select('id, name, wordbook_id, wordbooks(name)').eq('group_id', me.group_id),
@@ -68,7 +66,6 @@ export default async function GroupPage() {
   const memberList = membersRes.data ?? [];
   const memberIds = memberList.map((m) => m.id);
 
-  // [並列化 2] 本日のセッション、スコア、ストリーク、過去履歴を一括並列取得
   const [todaySessionsRes, scoreRowsRes, streaksRes, recentScoresRes] = await Promise.all([
     supabase
       .from('test_sessions')
@@ -109,7 +106,6 @@ export default async function GroupPage() {
     }
   });
 
-  // ランキングソート
   const doneMembers = memberList.filter((m) => doneUserIds.has(m.id));
   const notDoneMembers = memberList.filter((m) => !doneUserIds.has(m.id));
   const isMeDone = doneUserIds.has(user.id);
@@ -126,7 +122,6 @@ export default async function GroupPage() {
     return rawB - rawA;
   });
 
-  // アーキタイプ判定
   const archetypeMap = new Map<string, ArchetypeResult | null>();
   for (const m of doneMembers) {
     const arch = determineArchetype(
@@ -195,7 +190,7 @@ export default async function GroupPage() {
           <Link
             href="/test?mode=daily_check"
             prefetch={true}
-            className="mt-2 flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-akashiito font-mincho text-sm md:text-base font-bold text-paper shadow-md shadow-akashiito/20 transition active:scale-98 hover:opacity-95"
+            className="mt-2 flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-[#E24B4A] font-mincho text-sm md:text-base font-bold text-white shadow-md shadow-[#E24B4A]/25 transition active:scale-98 hover:opacity-95"
           >
             今日の本番チェックを受ける
           </Link>
@@ -305,7 +300,7 @@ export default async function GroupPage() {
         )}
       </section>
 
-      {/* 未受験メンバー一覧 */}
+      {/* 未受験メンバー一覧: 琥珀 (#EF9F27 / #9A5B00) で表現 */}
       {notDoneMembers.length > 0 && (
         <section className="space-y-2.5 pt-2">
           <h2 className="font-mincho text-xs md:text-sm font-bold text-ink/50 px-1">
@@ -320,7 +315,7 @@ export default async function GroupPage() {
                   key={m.id}
                   className={`flex items-center justify-between rounded-2xl border p-3.5 md:p-4 transition ${
                     isMe
-                      ? 'border-akashiito-border/60 bg-akashiito-subtle/30'
+                      ? 'border-[#EF9F27] bg-[#FEF3E2]'
                       : 'border-dashed border-line bg-white/60 text-ink/60'
                   }`}
                 >
@@ -332,7 +327,7 @@ export default async function GroupPage() {
                       <div className="flex items-center gap-1.5">
                         <span className="font-mincho text-sm md:text-base font-bold text-ink/80">{m.name}</span>
                         {isMe && (
-                          <span className="rounded-full bg-akashiito/10 px-1.5 py-0.2 font-maru text-[10px] md:text-xs font-bold text-akashiito">
+                          <span className="rounded-full bg-[#EF9F27] text-white px-1.5 py-0.2 font-maru text-[10px] md:text-xs font-bold">
                             あなた
                           </span>
                         )}
@@ -340,7 +335,7 @@ export default async function GroupPage() {
                       {wbName && <span className="font-maru text-[10px] md:text-xs text-ink/40">{wbName}</span>}
                     </div>
                   </div>
-                  <span className="rounded-full bg-stone-100 border border-line px-2.5 py-0.5 font-maru text-xs md:text-sm font-medium text-stone-500">
+                  <span className="rounded-full bg-[#FEF3E2] text-[#9A5B00] border border-[#EF9F27] px-2.5 py-0.5 font-maru text-xs md:text-sm font-bold">
                     未受験
                   </span>
                 </div>

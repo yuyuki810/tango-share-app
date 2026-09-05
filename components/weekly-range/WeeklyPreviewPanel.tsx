@@ -4,7 +4,7 @@ import type { PreviewDay } from '@/lib/assignment/calculateWeeklyPreview';
 
 const TYPE_BADGE: Record<PreviewDay['type'], { label: string; className: string }> = {
   new: { label: '新規進捗', className: 'bg-paper text-ink border-line font-medium' },
-  review: { label: '総復習', className: 'bg-highlighter/50 text-ink border-highlighter font-bold shadow-sm' },
+  review: { label: '総復習', className: 'bg-[#E6F7F2] text-[#136C56] border-[#9FE1CB] font-bold shadow-2xs' },
   off: { label: '休み', className: 'bg-line/30 text-ink/40 border-line' },
 };
 
