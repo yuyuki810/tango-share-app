@@ -1,24 +1,24 @@
 @import "tailwindcss";
 
 @theme {
-  --color-paper: #F5F4EF;
-  --color-paper-card: #FFFFFF;
-  --color-paper-hover: #EFECE3;
+  --color-paper: var(--color-paper-val);
+  --color-paper-card: var(--color-paper-card-val);
+  --color-paper-hover: var(--color-paper-hover-val);
 
-  --color-ink: #232A3B;
-  --color-ink-muted: #626B7F;
-  --color-ink-subtle: #8D95A5;
+  --color-ink: var(--color-ink-val);
+  --color-ink-muted: var(--color-ink-muted-val);
+  --color-ink-subtle: var(--color-ink-subtle-val);
 
-  --color-akashiito: #E2483D;
-  --color-akashiito-hover: #C9382E;
-  --color-akashiito-subtle: #FDF2F1;
-  --color-akashiito-border: #F7B8B3;
+  --color-akashiito: var(--color-akashiito-val);
+  --color-akashiito-hover: var(--color-akashiito-hover-val);
+  --color-akashiito-subtle: var(--color-akashiito-subtle-val);
+  --color-akashiito-border: var(--color-akashiito-border-val);
 
-  --color-highlighter: #F5C84C;
-  --color-highlighter-subtle: #FEF8E8;
+  --color-highlighter: var(--color-highlighter-val);
+  --color-highlighter-subtle: var(--color-highlighter-subtle-val);
 
-  --color-line: #D8D3C4;
-  --color-line-light: #EBE8DF;
+  --color-line: var(--color-line-val);
+  --color-line-light: var(--color-line-light-val);
 
   --font-mincho: var(--font-shippori), serif;
   --font-gothic: var(--font-zen-kaku), sans-serif;
@@ -28,6 +28,55 @@
   --shadow-sheet: 0 8px 24px -6px rgba(226, 72, 61, 0.12);
 }
 
+/* 🍵 既定テーマ: 和紙 (Washi) */
+:root, [data-theme='washi'] {
+  --color-paper-val: #F5F4EF;
+  --color-paper-card-val: #FFFFFF;
+  --color-paper-hover-val: #EFECE3;
+
+  --color-ink-val: #232A3B;
+  --color-ink-muted-val: #626B7F;
+  --color-ink-subtle-val: #8D95A5;
+
+  --color-akashiito-val: #E2483D;
+  --color-akashiito-hover-val: #C9382E;
+  --color-akashiito-subtle-val: #FDF2F1;
+  --color-akashiito-border-val: #F7B8B3;
+
+  --color-highlighter-val: #F5C84C;
+  --color-highlighter-subtle-val: #FEF8E8;
+
+  --color-line-val: #D8D3C4;
+  --color-line-light-val: #EBE8DF;
+}
+
+/* 🌌 新テーマ: 紫夜 (Dark Purple / Obsidian) */
+[data-theme='dark-purple'] {
+  --color-paper-val: #120E1C;
+  --color-paper-card-val: #1E172E;
+  --color-paper-hover-val: #2A203F;
+
+  --color-ink-val: #F3EEFA;
+  --color-ink-muted-val: #B3A7C7;
+  --color-ink-subtle-val: #7E7196;
+
+  --color-akashiito-val: #FF5353;
+  --color-akashiito-hover-val: #E03E3E;
+  --color-akashiito-subtle-val: #2E151A;
+  --color-akashiito-border-val: #6E2228;
+
+  --color-highlighter-val: #F7C948;
+  --color-highlighter-subtle-val: #2A2211;
+
+  --color-line-val: #34274F;
+  --color-line-light-val: #251B38;
+}
+
+/* 紫夜テーマ時のカード・背景自動適合 */
+[data-theme='dark-purple'] .bg-white {
+  background-color: var(--color-paper-card-val) !important;
+}
+
 @layer base {
   body {
     background-color: var(--color-paper);
@@ -35,6 +84,7 @@
     font-family: var(--font-gothic);
     -webkit-font-smoothing: antialiased;
     min-height: 100vh;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   ::selection {

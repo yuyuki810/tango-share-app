@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Shippori_Mincho, Zen_Kaku_Gothic_New, Zen_Maru_Gothic } from "next/font/google";
 import "./globals.css";
 import { IOSInstallPrompt } from "@/components/pwa/IOSInstallPrompt";
+import { ThemeProvider } from "@/components/theme/ThemeProvider";
 
 const shipporiMincho = Shippori_Mincho({
   weight: ["500", "700"],
@@ -25,7 +26,7 @@ const zenMaruGothic = Zen_Maru_Gothic({
 });
 
 export const viewport: Viewport = {
-  themeColor: "#232A3B", // Tailwind ink トークン実値
+  themeColor: "#232A3B",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -54,14 +55,33 @@ export default function RootLayout({
   return (
     <html
       lang="ja"
+      suppressHydrationWarning
       className={`${shipporiMincho.variable} ${zenKakuGothic.variable} ${zenMaruGothic.variable}`}
     >
+      <head>
+        {/* 初回描画前のチラつき (FOUC) を防止するインラインテーマ初期化スクリプト */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                var theme = localStorage.getItem('tango_theme');
+                if (theme === 'dark-purple') {
+                  document.documentElement.setAttribute('data-theme', 'dark-purple');
+                } else {
+                  document.documentElement.setAttribute('data-theme', 'washi');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
+      </head>
       <body className="flex min-h-screen flex-col items-center justify-start bg-paper antialiased">
-        <div className="w-full max-w-md md:max-w-xl lg:max-w-2xl min-h-screen flex flex-col px-4 py-6 sm:px-6 md:px-8">
-          {children}
-        </div>
-        {/* iOS向けホーム画面追加の控えめな案内 */}
-        <IOSInstallPrompt />
+        <ThemeProvider>
+          <div className="w-full max-w-md md:max-w-xl lg:max-w-2xl min-h-screen flex flex-col px-4 py-6 sm:px-6 md:px-8">
+            {children}
+          </div>
+          <IOSInstallPrompt />
+        </ThemeProvider>
       </body>
     </html>
   );
