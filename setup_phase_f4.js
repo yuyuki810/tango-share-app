@@ -1,4 +1,351 @@
-export const dynamic = 'force-dynamic';
+/**
+ * setup_phase_f4.js
+ * フェーズF-4: グループ管理機能（コード再表示・脱退・再参加）+ 下部バー「弱点マップ」削除
+ * 
+ * 実行方法:
+ *   node setup_phase_f4.js
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+// 1. .env.local / .env 自動読み込み
+function loadEnv() {
+  const envPaths = [
+    path.join(process.cwd(), '.env.local'),
+    path.join(process.cwd(), '.env'),
+  ];
+  for (const envPath of envPaths) {
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      content.split('\n').forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx !== -1) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          let val = trimmed.slice(eqIdx + 1).trim();
+          if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+          if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      });
+      console.log(`[ENV] 環境変数を読み込みました: ${envPath}`);
+      break;
+    }
+  }
+}
+
+loadEnv();
+
+// ファイル書き出しヘルパー
+function writeFile(relativeFilePath, fileContent) {
+  const fullPath = path.join(process.cwd(), relativeFilePath);
+  const dir = path.dirname(fullPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(fullPath, fileContent.trim() + '\n', 'utf8');
+  console.log(`[FILE] 生成/更新完了: ${relativeFilePath}`);
+}
+
+console.log('================================================================');
+console.log('フェーズF-4: グループ管理機能 & 下部バー調整のセットアップを開始します');
+console.log('================================================================\n');
+
+// -----------------------------------------------------------------------------
+// 1. app/api/groups/route.ts (脱退 action: "leave" の追加 & 孤立グループ自動削除)
+// -----------------------------------------------------------------------------
+const groupsRouteTs = `import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+
+function generateInviteCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let result = "";
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+export async function POST(request: Request) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { action, name, inviteCode } = body;
+
+    // 1. グループ作成
+    if (action === "create") {
+      if (!name || typeof name !== "string" || name.trim().length === 0) {
+        return NextResponse.json({ error: "グループ名を入力してください" }, { status: 400 });
+      }
+
+      let code = generateInviteCode();
+      let insertedGroup = null;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await supabase
+          .from("groups")
+          .insert({ name: name.trim(), invite_code: code })
+          .select()
+          .single();
+
+        if (!error && data) {
+          insertedGroup = data;
+          break;
+        }
+        code = generateInviteCode();
+      }
+
+      if (!insertedGroup) {
+        return NextResponse.json({ error: "グループ作成に失敗しました" }, { status: 500 });
+      }
+
+      await supabase.from("users").update({ group_id: insertedGroup.id }).eq("id", user.id);
+      return NextResponse.json({ success: true, group: insertedGroup });
+    }
+
+    // 2. 招待コードで参加
+    if (action === "join") {
+      if (!inviteCode || typeof inviteCode !== "string") {
+        return NextResponse.json({ error: "招待コードを入力してください" }, { status: 400 });
+      }
+
+      const cleanCode = inviteCode.trim().toUpperCase();
+      const { data: group, error: findError } = await supabase
+        .from("groups")
+        .select("id, name, invite_code")
+        .eq("invite_code", cleanCode)
+        .single();
+
+      if (findError || !group) {
+        return NextResponse.json({ error: "該当する招待コードのグループが見つかりません" }, { status: 404 });
+      }
+
+      await supabase.from("users").update({ group_id: group.id }).eq("id", user.id);
+      return NextResponse.json({ success: true, group });
+    }
+
+    // 3. グループ脱退 (ユーザーの全個人データ・学習履歴は保持)
+    if (action === "leave") {
+      const { data: me } = await supabase
+        .from("users")
+        .select("group_id")
+        .eq("id", user.id)
+        .single();
+
+      if (!me?.group_id) {
+        return NextResponse.json({ error: "グループに参加していません" }, { status: 400 });
+      }
+
+      const oldGroupId = me.group_id;
+
+      // ユーザーの group_id を null に更新
+      const { error: updateError } = await supabase
+        .from("users")
+        .update({ group_id: null })
+        .eq("id", user.id);
+
+      if (updateError) {
+        return NextResponse.json({ error: "グループの脱退に失敗しました" }, { status: 500 });
+      }
+
+      // 残りメンバー数が0人になった場合は孤立グループを安全に削除
+      const { count: remainingMembers } = await supabase
+        .from("users")
+        .select("id", { count: "exact", head: true })
+        .eq("group_id", oldGroupId);
+
+      if (remainingMembers === 0) {
+        await supabase.from("groups").delete().eq("id", oldGroupId);
+      }
+
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  } catch (err: any) {
+    console.error("Group API fatal error:", err);
+    return NextResponse.json({ error: "内部サーバーエラーが発生しました" }, { status: 500 });
+  }
+}
+`;
+
+writeFile('app/api/groups/route.ts', groupsRouteTs);
+
+// -----------------------------------------------------------------------------
+// 2. components/common/CopyButton.tsx (ワンタップコピーボタン)
+// -----------------------------------------------------------------------------
+const copyButtonTsx = `'use client';
+
+import React, { useState } from 'react';
+import { Copy, Check } from 'lucide-react';
+
+interface CopyButtonProps {
+  text: string;
+  className?: string;
+  label?: string;
+}
+
+export function CopyButton({ text, className = '', label = 'コピー' }: CopyButtonProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className={\`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 font-maru text-xs font-semibold transition active:scale-95 cursor-pointer \${
+        copied
+          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+          : 'border-line bg-white text-ink/80 hover:bg-paper hover:text-ink'
+      } \${className}\`}
+      aria-label="招待コードをコピー"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-emerald-600 stroke-[3]" /> : <Copy className="h-3.5 w-3.5 text-ink/50" />}
+      <span>{copied ? 'コピー完了' : label}</span>
+    </button>
+  );
+}
+`;
+
+writeFile('components/common/CopyButton.tsx', copyButtonTsx);
+
+// -----------------------------------------------------------------------------
+// 3. components/group/LeaveGroupDialog.tsx (グループ脱退確認モーダル)
+// -----------------------------------------------------------------------------
+const leaveGroupDialogTsx = `'use client';
+
+import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { LogOut, X, AlertTriangle } from 'lucide-react';
+
+export function LeaveGroupDialog() {
+  const router = useRouter();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleLeave = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'leave' }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || '脱退処理に失敗しました');
+        setIsLoading(false);
+        return;
+      }
+
+      setIsOpen(false);
+      router.refresh();
+    } catch (err: any) {
+      setError('通信エラーが発生しました');
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="inline-flex min-h-[44px] items-center gap-1.5 px-3 font-maru text-xs text-ink/40 hover:text-akashiito transition active:opacity-70 cursor-pointer"
+      >
+        <LogOut className="h-3.5 w-3.5" />
+        <span>グループを脱退する</span>
+      </button>
+
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={() => !isLoading && setIsOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl border border-line bg-paper p-5 md:p-6 shadow-2xl space-y-4 text-left animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2 text-akashiito">
+                <AlertTriangle className="h-5 w-5" />
+                <h3 className="font-mincho text-base font-bold text-ink">
+                  グループから脱退しますか？
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isLoading && setIsOpen(false)}
+                className="flex h-6 w-6 items-center justify-center rounded-full text-ink/40 hover:bg-paper-hover hover:text-ink cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="font-maru text-xs text-ink/70 leading-relaxed bg-white/80 p-3.5 rounded-2xl border border-line/60">
+              これまでの単語の学習履歴・連続記録・スコアは個人データとして<strong>そのまま保持</strong>されますが、このグループのランキングからは外れます。
+            </p>
+
+            {error && <p className="font-maru text-xs text-akashiito">{error}</p>}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                disabled={isLoading}
+                onClick={() => setIsOpen(false)}
+                className="flex min-h-[44px] flex-1 items-center justify-center rounded-xl border border-line bg-white font-maru text-xs font-medium text-ink/70 transition active:scale-98 cursor-pointer hover:bg-white"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                disabled={isLoading}
+                onClick={handleLeave}
+                className="flex min-h-[44px] flex-1 items-center justify-center rounded-xl bg-akashiito font-mincho text-xs font-bold text-white shadow-sm transition active:scale-98 cursor-pointer hover:bg-akashiito/90 disabled:opacity-50"
+              >
+                {isLoading ? '処理中...' : '脱退する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+`;
+
+writeFile('components/group/LeaveGroupDialog.tsx', leaveGroupDialogTsx);
+
+// -----------------------------------------------------------------------------
+// 4. app/(main)/group/page.tsx (招待コード再表示 & 脱退 & 未所属時UI)
+// -----------------------------------------------------------------------------
+const groupPageTsx = `export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 import { redirect } from 'next/navigation';
@@ -180,7 +527,7 @@ export default async function GroupPage() {
         <div className="h-2 md:h-2.5 w-full overflow-hidden rounded-full bg-line/40">
           <div
             className="h-full rounded-full bg-ink transition-all duration-300"
-            style={{ width: `${totalCount > 0 ? (doneCount / totalCount) * 100 : 0}%` }}
+            style={{ width: \`\${totalCount > 0 ? (doneCount / totalCount) * 100 : 0}%\` }}
           />
         </div>
         <p className="font-maru text-[11px] md:text-xs text-ink/50">
@@ -251,13 +598,13 @@ export default async function GroupPage() {
               return (
                 <div
                   key={m.id}
-                  className={`flex items-start justify-between rounded-2xl border p-4 md:p-5 shadow-xs transition ${
+                  className={\`flex items-start justify-between rounded-2xl border p-4 md:p-5 shadow-xs transition \${
                     isFirst
                       ? 'border-amber-300/80 bg-amber-50/40 ring-1 ring-amber-300/50'
                       : isMe
                       ? 'border-line bg-akashiito/5'
                       : 'border-line bg-white'
-                  }`}
+                  }\`}
                 >
                   <div className="flex items-start gap-3 md:gap-4">
                     <div className="pt-0.5">{rankBadge}</div>
@@ -318,11 +665,11 @@ export default async function GroupPage() {
               return (
                 <div
                   key={m.id}
-                  className={`flex items-center justify-between rounded-2xl border p-3.5 md:p-4 transition ${
+                  className={\`flex items-center justify-between rounded-2xl border p-3.5 md:p-4 transition \${
                     isMe
                       ? 'border-akashiito-border/60 bg-akashiito-subtle/30'
                       : 'border-dashed border-line bg-white/60 text-ink/60'
-                  }`}
+                  }\`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-100 text-stone-400">
@@ -357,3 +704,59 @@ export default async function GroupPage() {
     </main>
   );
 }
+`;
+
+writeFile('app/(main)/group/page.tsx', groupPageTsx);
+
+// -----------------------------------------------------------------------------
+// 5. components/layout/BottomNav.tsx (「弱点マップ」を削除し3項目でバランス調整)
+// -----------------------------------------------------------------------------
+const bottomNavTsx = `'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+
+export function BottomNav() {
+  const pathname = usePathname();
+
+  // テスト中・単語カードめくり中は下部ナビを隠して全画面で集中させる
+  if (pathname.startsWith('/test') || pathname.startsWith('/review-preview')) {
+    return null;
+  }
+
+  const navItems = [
+    { href: '/dashboard', label: 'ホーム', icon: '📖' },
+    { href: '/group', label: 'グループ', icon: '👥' },
+    { href: '/settings/wordbook', label: '設定', icon: '⚙️' },
+  ];
+
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-line/80 bg-paper/95 backdrop-blur-md">
+      <div className="mx-auto grid grid-cols-3 max-w-md md:max-w-xl lg:max-w-2xl items-center px-4 py-1.5">
+        {navItems.map((item) => {
+          const isActive = pathname === item.href;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              prefetch={true}
+              className={\`flex min-h-[52px] flex-col items-center justify-center rounded-xl py-1 transition active:scale-95 \${
+                isActive ? 'text-akashiito font-bold' : 'text-ink/50 hover:text-ink'
+              }\`}
+            >
+              <span className="text-xl">{item.icon}</span>
+              <span className="mt-0.5 font-maru text-[11px] md:text-xs">{item.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+`;
+
+writeFile('components/layout/BottomNav.tsx', bottomNavTsx);
+
+console.log('\n================================================================');
+console.log('✅ フェーズF-4: グループ管理機能 & 下部バー調整が完了しました！');
+console.log('================================================================\n');
