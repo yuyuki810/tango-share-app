@@ -61,7 +61,6 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
     if (!isTop || exitDirection !== null) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // テキスト入力欄にフォーカスがある場合はショートカットを無視
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -75,7 +74,6 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
       const code = e.code;
       const key = e.key;
 
-      // 1. めくる (Space, ArrowUp, KeyW, Enter)
       if (
         code === 'Space' ||
         code === 'ArrowUp' ||
@@ -91,7 +89,6 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
         return;
       }
 
-      // 2. わからなかった (ArrowLeft, KeyA, a, A)
       if (
         code === 'ArrowLeft' ||
         code === 'KeyA' ||
@@ -104,7 +101,6 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
         return;
       }
 
-      // 3. わかった (ArrowRight, KeyD, KeyS, d, D, s, S)
       if (
         code === 'ArrowRight' ||
         code === 'KeyD' ||
@@ -127,7 +123,6 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
     };
   }, [isTop, exitDirection, handleReveal, commitJudge]);
 
-  // ポインター / スワイプ操作
   const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!isTop || exitDirection !== null) return;
     if ((e.target as HTMLElement).closest('button[data-action="judge"]')) return;
@@ -227,6 +222,7 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
         opacity: exitDirection ? 0 : 1,
         backfaceVisibility: 'hidden',
         WebkitBackfaceVisibility: 'hidden',
+        touchAction: 'manipulation',
       }}
       className={`absolute inset-0 flex select-none flex-col justify-between rounded-3xl border border-line bg-white p-6 md:p-8 lg:p-10 shadow-lg touch-none ${
         !isRevealed && isTop ? 'cursor-pointer' : ''
@@ -236,13 +232,13 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
           : 'transition-none'
       }`}
     >
-      {/* 1. 学習回数バッジ */}
-      <div className="flex justify-between items-center">
+      {/* 1. 学習回数バッジ & 単語番号 (テキスト選択バグ防止: select-none + pointer-events-none) */}
+      <div className="flex justify-between items-center select-none pointer-events-none">
         <span className="rounded-full border border-line bg-paper px-3 py-1 text-xs md:text-sm text-ink/60 font-maru">
           {studyCountLabel}
         </span>
         {card.number && (
-          <span className="font-mono text-xs text-ink/40">
+          <span className="font-mono text-xs text-ink/40 select-none">
             No.{card.number}
           </span>
         )}
@@ -252,7 +248,7 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
       {isTop && isRevealed && dragX !== 0 && (
         <div
           style={{ opacity: Math.min(Math.abs(dragX) / 100, 1) }}
-          className={`pointer-events-none absolute top-16 z-20 rounded-xl border-2 px-4 py-1.5 text-sm md:text-base font-bold shadow-sm ${
+          className={`pointer-events-none select-none absolute top-16 z-20 rounded-xl border-2 px-4 py-1.5 text-sm md:text-base font-bold shadow-sm ${
             dragX > 0
               ? 'right-6 md:right-10 -rotate-12 border-ink text-ink bg-white/90'
               : 'left-6 md:left-10 rotate-12 border-ink/60 text-ink/60 bg-white/90'
@@ -263,14 +259,14 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
       )}
 
       {/* 2. 単語本体 */}
-      <div className="my-auto flex w-full flex-col items-center justify-center gap-2 py-4 text-center">
+      <div className="my-auto flex w-full flex-col items-center justify-center gap-2 py-4 text-center select-none pointer-events-none">
         <p
-          className={`w-full font-mincho font-bold text-ink tracking-tight whitespace-nowrap leading-normal py-2 ${headwordFontSize}`}
+          className={`w-full font-mincho font-bold text-ink tracking-tight whitespace-nowrap leading-normal py-2 select-none ${headwordFontSize}`}
         >
           {card.headword}
         </p>
         {card.pronunciation ? (
-          <p className="font-maru text-lg sm:text-xl md:text-2xl text-ink/75 tracking-wider">
+          <p className="font-maru text-lg sm:text-xl md:text-2xl text-ink/75 tracking-wider select-none">
             /{card.pronunciation}/
           </p>
         ) : (
@@ -279,14 +275,14 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
       </div>
 
       {/* 3. 下部エリア */}
-      <div className="flex flex-col gap-3 md:gap-4">
-        <div className="relative h-24 md:h-28 overflow-hidden rounded-2xl">
-          <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-line bg-paper p-3 md:p-4 text-center">
-            <p className="font-maru text-base md:text-lg font-bold text-ink leading-snug">
+      <div className="flex flex-col gap-3 md:gap-4 select-none">
+        <div className="relative h-24 md:h-28 overflow-hidden rounded-2xl select-none">
+          <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-line bg-paper p-3 md:p-4 text-center select-none">
+            <p className="font-maru text-base md:text-lg font-bold text-ink leading-snug select-none">
               {card.meaning}
             </p>
             {card.exampleSentence && (
-              <p className="mt-1 font-maru text-xs md:text-sm text-ink/50 line-clamp-1">
+              <p className="mt-1 font-maru text-xs md:text-sm text-ink/50 line-clamp-1 select-none">
                 {card.exampleSentence}
               </p>
             )}
@@ -296,7 +292,7 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
             style={{
               transform: isRevealed ? 'translateX(105%) rotate(6deg)' : 'translateX(0)',
             }}
-            className={`absolute inset-0 flex items-center justify-center rounded-2xl bg-akashiito text-sm md:text-base font-bold text-paper shadow-inner transition-transform duration-300 ease-out motion-reduce:transition-none ${
+            className={`absolute inset-0 flex items-center justify-center rounded-2xl bg-akashiito text-sm md:text-base font-bold text-paper shadow-inner transition-transform duration-300 ease-out motion-reduce:transition-none select-none ${
               isRevealed ? 'pointer-events-none' : ''
             }`}
           >
@@ -304,9 +300,9 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
           </div>
         </div>
 
-        {/* 4. 判定ボタン (キーバッジなしのクリーンなボタン) */}
+        {/* 4. 判定ボタン */}
         <div
-          className={`flex gap-3 md:gap-4 transition-opacity duration-200 ${
+          className={`flex gap-3 md:gap-4 transition-opacity duration-200 select-none ${
             isRevealed && isTop ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
         >
@@ -318,7 +314,7 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
               e.stopPropagation();
               commitJudge(false);
             }}
-            className="min-h-[56px] md:min-h-[60px] flex-1 rounded-2xl border border-line bg-white font-medium text-ink/70 transition active:bg-paper hover:bg-paper/50 flex items-center justify-center cursor-pointer shadow-xs"
+            className="min-h-[56px] md:min-h-[60px] flex-1 rounded-2xl border border-line bg-white font-medium text-ink/70 transition active:bg-paper hover:bg-paper/50 flex items-center justify-center cursor-pointer shadow-xs select-none"
           >
             わからなかった
           </button>
@@ -330,7 +326,7 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
               e.stopPropagation();
               commitJudge(true);
             }}
-            className="min-h-[56px] md:min-h-[60px] flex-1 rounded-2xl bg-ink font-medium text-paper transition active:opacity-90 hover:bg-ink/90 flex items-center justify-center cursor-pointer shadow-sm"
+            className="min-h-[56px] md:min-h-[60px] flex-1 rounded-2xl bg-ink font-medium text-paper transition active:opacity-90 hover:bg-ink/90 flex items-center justify-center cursor-pointer shadow-sm select-none"
           >
             わかった
           </button>

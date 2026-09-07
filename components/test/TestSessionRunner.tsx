@@ -149,7 +149,31 @@ export function TestSessionRunner({
     });
   };
 
-  // 3. 全問終了時のセッション完了確定処理 (正答率ベースでサマリー判定)
+  // 3. 一つ前の回答修正ハンドラー (/api/test-sessions/modify-answer)
+  const handleModifyJudge = async (wordId: string, isKnown: boolean) => {
+    const currentId = sessionIdRef.current;
+    if (!currentId) return;
+
+    try {
+      const res = await fetch('/api/test-sessions/modify-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: currentId,
+          wordId,
+          isKnown,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error('Failed to modify answer:', data.error);
+      }
+    } catch (err) {
+      console.error('Modify answer request error:', err);
+    }
+  };
+
+  // 4. 全問終了時のセッション完了確定処理 (正答率ベースでサマリー判定)
   const handleFinished = (resultsMap: Map<string, boolean>) => {
     const currentId = sessionIdRef.current;
     const results = cards.map((c) => ({
@@ -256,7 +280,7 @@ export function TestSessionRunner({
 
   if (isInitializing) {
     return (
-      <div className="flex h-[80vh] flex-col items-center justify-center gap-3 text-ink/60 font-maru">
+      <div className="flex h-[80vh] flex-col items-center justify-center gap-3 text-ink/60 font-maru select-none">
         <RefreshCw className="h-6 w-6 animate-spin text-ink/40" />
         <p className="text-xs">テストを準備中...</p>
       </div>
@@ -266,7 +290,7 @@ export function TestSessionRunner({
   if (resumePrompt) {
     const isDailyCheck = sessionType === 'daily_check';
     return (
-      <div className="mx-auto flex min-h-[85vh] max-w-md md:max-w-xl flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
+      <div className="mx-auto flex min-h-[85vh] max-w-md md:max-w-xl flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200 select-none">
         <div className="w-full rounded-3xl border border-line bg-white p-6 shadow-sm space-y-4">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-700 border border-amber-300">
             <RotateCcw className="h-6 w-6" />
@@ -349,6 +373,7 @@ export function TestSessionRunner({
       initialIndex={initialIndex}
       initialAnswers={initialAnswers}
       onJudge={handleSingleJudge}
+      onModifyJudge={handleModifyJudge}
       onFinished={handleFinished}
       title={sessionType === 'daily_check' ? '本日のテスト結果' : '苦手克服テスト結果'}
     />
