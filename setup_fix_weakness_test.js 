@@ -1,0 +1,568 @@
+const fs = require('fs');
+const path = require('path');
+
+function writeFile(filePath, content) {
+  const fullPath = path.join(__dirname, filePath);
+  fs.writeFileSync(fullPath, content.trim() + '\n', 'utf8');
+  console.log(`[Fixed] ${filePath}`);
+}
+
+// -----------------------------------------------------------------------------
+// 1. app/api/test-sessions/start/route.ts
+//    出題単語リスト (wordIds) と出題数 (totalCount) に基づく厳密なセッション再開検証
+// -----------------------------------------------------------------------------
+writeFile(
+  'app/api/test-sessions/start/route.ts',
+  `import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getTodayJST } from "@/lib/assignment/weekDates";
+
+export async function POST(req: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { type = "normal", dailyAssignmentId = null, totalCount = 0, wordIds = [] } = body;
+    const today = getTodayJST();
+
+    // 1. daily_check の場合: 完了済みセッションの重複チェック (409 Conflict)
+    if (type === "daily_check") {
+      const { data: completedSession } = await supabase
+        .from("test_sessions")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("date", today)
+        .eq("type", "daily_check")
+        .not("completed_at", "is", null)
+        .maybeSingle();
+
+      if (completedSession) {
+        return NextResponse.json(
+          {
+            error: "Conflict",
+            detail: "本日の本番デイリーチェックは既に受験完了しています。",
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    // 2. 進行中(未完了)のセッションが存在するか確認
+    let incompleteQuery = supabase
+      .from("test_sessions")
+      .select("id, type, date, total_count, correct_count, created_at")
+      .eq("user_id", user.id)
+      .eq("type", type)
+      .is("completed_at", null);
+
+    if (type === "daily_check") {
+      incompleteQuery = incompleteQuery.eq("date", today);
+    } else if (totalCount > 0) {
+      // normal の場合は出題数が一致する未完了セッションのみを対象にする
+      incompleteQuery = incompleteQuery.eq("total_count", totalCount);
+    }
+
+    const { data: incompleteSession } = await incompleteQuery
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (incompleteSession) {
+      // 既に回答済みの単語一覧を取得
+      const { data: answers } = await supabase
+        .from("test_answers")
+        .select("word_id, is_known, origin_daily_assignment_id, created_at")
+        .eq("session_id", incompleteSession.id)
+        .order("created_at", { ascending: true });
+
+      const answeredList = answers ?? [];
+
+      // 単語リストの整合性チェック:
+      // 今回の出題単語(wordIds)が渡されている場合、回答済み単語がその先頭と一致しているか検証
+      let isValidResume = false;
+      if (
+        answeredList.length > 0 &&
+        totalCount > 0 &&
+        answeredList.length < totalCount
+      ) {
+        if (Array.isArray(wordIds) && wordIds.length > 0) {
+          const expectedPrefix = wordIds.slice(0, answeredList.length);
+          const actualIds = answeredList.map((a) => a.word_id);
+          isValidResume = actualIds.every((id, idx) => id === expectedPrefix[idx]);
+        } else {
+          isValidResume = true;
+        }
+      }
+
+      if (isValidResume) {
+        return NextResponse.json({
+          success: true,
+          mode: "resume",
+          session: incompleteSession,
+          answeredWords: answeredList.map((a) => ({
+            wordId: a.word_id,
+            isKnown: a.is_known,
+            originDailyAssignmentId: a.origin_daily_assignment_id,
+          })),
+        });
+      }
+    }
+
+    // 3. 一致する未完了セッションがない場合は新規セッションを作成
+    const { data: newSession, error: createError } = await supabase
+      .from("test_sessions")
+      .insert({
+        user_id: user.id,
+        date: today,
+        type: type,
+        correct_count: 0,
+        total_count: totalCount,
+        completed_at: null,
+      })
+      .select("id, type, date, total_count, correct_count, created_at")
+      .single();
+
+    if (createError || !newSession) {
+      if (createError?.code === "23505") {
+        return NextResponse.json(
+          { error: "Conflict", detail: "本日のセッションは既に作成されています。" },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json(
+        { error: "Failed to start session", detail: createError?.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      mode: "new",
+      session: newSession,
+      answeredWords: [],
+    });
+  } catch (err: any) {
+    console.error("Start session error:", err);
+    return NextResponse.json(
+      { error: "Internal Server Error", detail: err?.message || String(err) },
+      { status: 500 }
+    );
+  }
+}
+`
+);
+
+// -----------------------------------------------------------------------------
+// 2. components/test/TestSessionRunner.tsx
+//    wordIds の送信 & クライアント側での厳密な単語一致バリデーション
+// -----------------------------------------------------------------------------
+writeFile(
+  'components/test/TestSessionRunner.tsx',
+  `'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { WordJudgeCardScreen } from '@/components/review/WordJudgeCardScreen';
+import type { WordCardData } from '@/components/review/WordJudgeCard';
+import { ChunkSummaryScreen, type ChunkResultItem } from '@/components/weakness/ChunkSummaryScreen';
+import { TestResultScreen } from '@/components/test/TestResultScreen';
+import type { ReviewChunkSummaryInfo } from '@/lib/test/getTodayTestWords';
+import { RefreshCw, Play, RotateCcw } from 'lucide-react';
+
+interface TestSessionRunnerProps {
+  cards: WordCardData[];
+  dailyAssignmentId: string | null;
+  sessionType: 'daily_check' | 'normal';
+  isReviewDay?: boolean;
+  reviewChunks?: ReviewChunkSummaryInfo[];
+}
+
+export function TestSessionRunner({
+  cards,
+  dailyAssignmentId,
+  sessionType,
+  isReviewDay = false,
+  reviewChunks = [],
+}: TestSessionRunnerProps) {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [resumePrompt, setResumePrompt] = useState<{
+    answeredCount: number;
+    answeredMap: Map<string, boolean>;
+  } | null>(null);
+
+  const [initialIndex, setInitialIndex] = useState(0);
+  const [initialAnswers, setInitialAnswers] = useState<Map<string, boolean>>(new Map());
+  const pendingAnswersQueue = useRef<Array<{ wordId: string; isKnown: boolean }>>([]);
+
+  const [resultData, setResultData] = useState<{
+    correctCount: number;
+    totalCount: number;
+    wrongCards: WordCardData[];
+    chunkResults?: ChunkResultItem[];
+  } | null>(null);
+
+  const [saveStatus, setSaveStatus] = useState<{
+    isSaving: boolean;
+    isSuccess: boolean;
+    errorMessage?: string;
+    detail?: string;
+    savedCount?: number;
+  }>({
+    isSaving: false,
+    isSuccess: false,
+  });
+
+  // 1. セッション初期化 (/api/test-sessions/start)
+  useEffect(() => {
+    let isMounted = true;
+    setIsInitializing(true);
+
+    const cardWordIds = cards.map((c) => c.wordId);
+
+    fetch('/api/test-sessions/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: sessionType,
+        dailyAssignmentId,
+        totalCount: cards.length,
+        wordIds: cardWordIds,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!isMounted) return;
+
+        if (res.ok && data.success) {
+          const currentId = data.session.id;
+          setSessionId(currentId);
+          sessionIdRef.current = currentId;
+
+          // 未送信キューがあればフラッシュ
+          if (pendingAnswersQueue.current.length > 0) {
+            pendingAnswersQueue.current.forEach((item) => {
+              const matchedCard = cards.find((c) => c.wordId === item.wordId);
+              fetch('/api/test-sessions/answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: currentId,
+                  wordId: item.wordId,
+                  isKnown: item.isKnown,
+                  originDailyAssignmentId: matchedCard?.originDailyAssignmentId || dailyAssignmentId,
+                }),
+              }).catch((e) => console.error('Queue flush error:', e));
+            });
+            pendingAnswersQueue.current = [];
+          }
+
+          // 再開データの厳密検証
+          if (data.mode === 'resume' && Array.isArray(data.answeredWords) && data.answeredWords.length > 0) {
+            const answeredWords: Array<{ wordId: string; isKnown: boolean }> = data.answeredWords;
+            const isValidCount = answeredWords.length < cards.length;
+            const isMatchWords = answeredWords.every(
+              (a, idx) => a.wordId === cards[idx]?.wordId
+            );
+
+            if (isValidCount && isMatchWords) {
+              const answeredMap = new Map<string, boolean>();
+              answeredWords.forEach((a) => {
+                answeredMap.set(a.wordId, a.isKnown);
+              });
+
+              setResumePrompt({
+                answeredCount: answeredWords.length,
+                answeredMap,
+              });
+            } else {
+              // 整合しない中断データは無視して1問目から開始
+              setInitialAnswers(new Map());
+              setInitialIndex(0);
+            }
+          } else {
+            setInitialAnswers(new Map());
+            setInitialIndex(0);
+          }
+        } else {
+          console.error('Failed to start session:', data.error);
+        }
+      })
+      .catch((err) => {
+        console.error('Start session request error:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsInitializing(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [sessionType, dailyAssignmentId, cards]);
+
+  // 2. 単語判定のたびに即座に都度保存
+  const handleSingleJudge = (wordId: string, isKnown: boolean) => {
+    const currentId = sessionIdRef.current;
+    const matchedCard = cards.find((c) => c.wordId === wordId);
+
+    if (!currentId) {
+      pendingAnswersQueue.current.push({ wordId, isKnown });
+      return;
+    }
+
+    fetch('/api/test-sessions/answer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: currentId,
+        wordId,
+        isKnown,
+        originDailyAssignmentId: matchedCard?.originDailyAssignmentId || dailyAssignmentId,
+      }),
+    }).catch((err) => {
+      console.error('Answer streaming error:', err);
+    });
+  };
+
+  // 3. 一つ前の回答修正ハンドラー (/api/test-sessions/modify-answer)
+  const handleModifyJudge = async (wordId: string, isKnown: boolean) => {
+    const currentId = sessionIdRef.current;
+    if (!currentId) return;
+
+    try {
+      const res = await fetch('/api/test-sessions/modify-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: currentId,
+          wordId,
+          isKnown,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error('Failed to modify answer:', data.error);
+      }
+    } catch (err) {
+      console.error('Modify answer request error:', err);
+    }
+  };
+
+  // 4. 全問終了時のセッション完了確定処理
+  const handleFinished = (resultsMap: Map<string, boolean>) => {
+    const currentId = sessionIdRef.current;
+    const results = cards.map((c) => ({
+      wordId: c.wordId,
+      isKnown: resultsMap.get(c.wordId) ?? false,
+      originDailyAssignmentId: c.originDailyAssignmentId || dailyAssignmentId,
+    }));
+
+    const correctCount = results.filter((r) => r.isKnown).length;
+    const totalCount = results.length;
+    const wrongCards = cards.filter((c) => !(resultsMap.get(c.wordId) ?? false));
+
+    if (isReviewDay && reviewChunks.length > 0) {
+      const chunkResults: ChunkResultItem[] = reviewChunks.map((rc) => {
+        const chunkCards = cards.filter(
+          (c) =>
+            c.originDailyAssignmentId === rc.chunkId ||
+            (typeof c.number === 'number' &&
+              c.number >= rc.rangeStart &&
+              c.number <= rc.rangeEnd)
+        );
+        const cTotal = chunkCards.length;
+        const cCorrect = chunkCards.filter((c) => resultsMap.get(c.wordId) ?? false).length;
+        const cAccuracy = cTotal > 0 ? Math.round((cCorrect / cTotal) * 100) : 0;
+
+        let status: 'improved' | 'same' | 'worse' | 'first' = 'first';
+        if (rc.prevAccuracyRate !== null) {
+          const diff = cAccuracy - rc.prevAccuracyRate;
+          if (diff >= 10) {
+            status = 'improved';
+          } else if (diff <= -10) {
+            status = 'worse';
+          } else {
+            status = 'same';
+          }
+        } else {
+          status = 'first';
+        }
+
+        return {
+          chunkId: rc.chunkId,
+          rangeStart: rc.rangeStart,
+          rangeEnd: rc.rangeEnd,
+          originDate: rc.originDate,
+          correctCount: cCorrect,
+          totalCount: cTotal,
+          accuracyRate: cAccuracy,
+          prevAccuracyRate: rc.prevAccuracyRate,
+          status,
+        };
+      });
+
+      setResultData({
+        correctCount,
+        totalCount,
+        wrongCards,
+        chunkResults,
+      });
+    } else {
+      setResultData({
+        correctCount,
+        totalCount,
+        wrongCards,
+      });
+    }
+
+    setSaveStatus({ isSaving: true, isSuccess: false });
+
+    fetch('/api/test-sessions/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: currentId,
+        results,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setSaveStatus({
+            isSaving: false,
+            isSuccess: true,
+            savedCount: data.savedAnswersCount ?? results.length,
+          });
+        } else {
+          setSaveStatus({
+            isSaving: false,
+            isSuccess: false,
+            errorMessage: data.error || '保存エラー',
+            detail: data.detail || \`HTTP \${res.status}\`,
+          });
+        }
+      })
+      .catch((err) => {
+        console.error('Error completing test session:', err);
+        setSaveStatus({
+          isSaving: false,
+          isSuccess: false,
+          errorMessage: '通信エラー',
+          detail: err?.message || String(err),
+        });
+      });
+  };
+
+  if (isInitializing) {
+    return (
+      <div className="flex h-[80vh] flex-col items-center justify-center gap-3 text-ink/60 font-maru select-none">
+        <RefreshCw className="h-6 w-6 animate-spin text-ink/40" />
+        <p className="text-xs">テストを準備中...</p>
+      </div>
+    );
+  }
+
+  if (resumePrompt) {
+    const isDailyCheck = sessionType === 'daily_check';
+    return (
+      <div className="mx-auto flex min-h-[85vh] max-w-md md:max-w-xl flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200 select-none">
+        <div className="w-full rounded-3xl border border-line bg-white p-6 shadow-sm space-y-4">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-700 border border-amber-300">
+            <RotateCcw className="h-6 w-6" />
+          </div>
+
+          <div>
+            <h2 className="font-mincho text-xl font-bold text-ink">
+              前回の続きから再開しますか？
+            </h2>
+            <p className="mt-1.5 font-maru text-xs text-ink/60 leading-relaxed">
+              前回の中断データが見つかりました。<br />
+              <strong className="text-ink font-bold">
+                {resumePrompt.answeredCount} / {cards.length} 語
+              </strong> まで回答済みです。
+            </p>
+          </div>
+
+          <div className="space-y-2 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setInitialAnswers(resumePrompt.answeredMap);
+                setInitialIndex(resumePrompt.answeredCount);
+                setResumePrompt(null);
+              }}
+              className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-sm transition active:scale-98 cursor-pointer hover:bg-ink/90"
+            >
+              <Play className="h-4 w-4 fill-paper" />
+              <span>続きから再開する（{resumePrompt.answeredCount + 1}問目〜）</span>
+            </button>
+
+            {!isDailyCheck ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setInitialAnswers(new Map());
+                  setInitialIndex(0);
+                  setResumePrompt(null);
+                }}
+                className="flex min-h-[44px] w-full items-center justify-center rounded-xl border border-line bg-paper font-maru text-xs font-medium text-ink/70 transition hover:bg-paper-hover active:scale-98 cursor-pointer"
+              >
+                最初からやり直す
+              </button>
+            ) : (
+              <p className="font-maru text-[11px] text-ink/40 pt-1">
+                ※ 本番チェックは1日1回限定のため、続きからのみ受験可能です
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (resultData) {
+    if (isReviewDay && resultData.chunkResults) {
+      return (
+        <ChunkSummaryScreen
+          totalCorrect={resultData.correctCount}
+          totalCount={resultData.totalCount}
+          chunkResults={resultData.chunkResults}
+        />
+      );
+    }
+
+    return (
+      <TestResultScreen
+        correctCount={resultData.correctCount}
+        totalCount={resultData.totalCount}
+        wrongCards={resultData.wrongCards}
+        sessionType={sessionType}
+        saveStatus={saveStatus}
+      />
+    );
+  }
+
+  return (
+    <WordJudgeCardScreen
+      cards={cards}
+      initialIndex={initialIndex}
+      initialAnswers={initialAnswers}
+      onJudge={handleSingleJudge}
+      onModifyJudge={handleModifyJudge}
+      onFinished={handleFinished}
+      title={sessionType === 'daily_check' ? '本日のテスト結果' : '苦手克服テスト結果'}
+    />
+  );
+}
+`
+);
+
+console.log('\\n✅ [修正完了] 弱点マップテストの即時終了バグを根本解決しました。');
