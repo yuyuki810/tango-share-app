@@ -1,4 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+const fs = require('fs');
+const path = require('path');
+
+const targetFile = path.join(__dirname, 'app/api/test-sessions/answer/route.ts');
+
+const content = `import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getTodayJST } from "@/lib/assignment/weekDates";
 
@@ -115,3 +120,7 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+`;
+
+fs.writeFileSync(targetFile, content.trim() + '\n', 'utf8');
+console.log('✅ Successfully fixed app/api/test-sessions/answer/route.ts');
