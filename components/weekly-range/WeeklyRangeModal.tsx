@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useRef, useTransition, type PointerEvent as ReactPointerEvent } from 'react';
+import { useMemo, useState, useRef, useTransition, useEffect, type PointerEvent as ReactPointerEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CycleType, DayType } from '@/lib/assignment/cycleTypes';
 import { calculateWeeklyPreview } from '@/lib/assignment/calculateWeeklyPreview';
@@ -15,7 +15,7 @@ interface WeeklyRangeModalProps {
   onClose: () => void;
   wordbookId: string;
   wordbookTotalWords: number;
-  weekStartDate: string; // 今週の土曜日 YYYY-MM-DD
+  weekStartDate: string;
   initialCycleType?: CycleType;
   initialCustomDayTypes?: DayType[];
   initialRangeStart?: number;
@@ -50,6 +50,18 @@ export function WeeklyRangeModal({
 
   const [dragY, setDragY] = useState(0);
   const dragStartY = useRef<number | null>(null);
+
+  // モーダル開閉時や初期値変更時に内部ステートを最新プロップスへ確実に同期
+  useEffect(() => {
+    if (isOpen) {
+      setRangeStart(initialRangeStart ?? 1);
+      setPerDayCount(initialPerDayCount ?? 20);
+      setCycleType(initialCycleType ?? 'five_two');
+      if (initialCustomDayTypes) {
+        setCustomDayTypes(initialCustomDayTypes);
+      }
+    }
+  }, [isOpen, initialRangeStart, initialPerDayCount, initialCycleType, initialCustomDayTypes]);
 
   const handlePointerDown = (e: ReactPointerEvent) => {
     dragStartY.current = e.clientY;
@@ -146,13 +158,13 @@ export function WeeklyRangeModal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{ transform: `translateY(${dragY}px)` }}
-        className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-paper shadow-2xl transition-transform duration-200 motion-reduce:transition-none"
+        className="max-h-[92vh] w-full max-w-md md:max-w-xl overflow-y-auto rounded-t-3xl bg-paper shadow-2xl transition-transform duration-200 motion-reduce:transition-none"
       >
         <div
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          className="sticky top-0 z-10 flex touch-none flex-col items-center bg-paper/95 px-4 pb-2 pt-3 backdrop-blur-xs"
+          className="sticky top-0 z-10 flex touch-none flex-col items-center bg-paper/95 px-4 pb-2 pt-3 backdrop-blur-xs border-b border-line/40"
         >
           <div className="h-1.5 w-12 rounded-full bg-line" />
           <div className="mt-2 flex w-full items-center justify-between">
@@ -161,18 +173,18 @@ export function WeeklyRangeModal({
               type="button"
               onClick={onClose}
               aria-label="閉じる"
-              className="flex min-h-[44px] min-w-[44px] items-center justify-center font-bold text-ink/40 hover:text-ink"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center font-bold text-ink/40 hover:text-ink cursor-pointer"
             >
               ✕
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 px-4 pt-2">
+        <div className="grid grid-cols-2 gap-2 px-4 pt-3">
           <button
             type="button"
             onClick={() => setActiveTab('settings')}
-            className={`min-h-[44px] rounded-xl border px-2 text-xs font-bold transition ${
+            className={`min-h-[44px] rounded-xl border px-2 text-xs font-bold transition cursor-pointer ${
               activeTab === 'settings' ? 'border-ink bg-ink text-paper shadow-sm' : 'border-line bg-white text-ink/70'
             }`}
           >
@@ -181,7 +193,7 @@ export function WeeklyRangeModal({
           <button
             type="button"
             onClick={() => setActiveTab('preview')}
-            className={`min-h-[44px] rounded-xl border px-2 text-xs font-bold transition ${
+            className={`min-h-[44px] rounded-xl border px-2 text-xs font-bold transition cursor-pointer ${
               activeTab === 'preview' ? 'border-ink bg-ink text-paper shadow-sm' : 'border-line bg-white text-ink/70'
             }`}
           >
@@ -222,7 +234,7 @@ export function WeeklyRangeModal({
             type="button"
             onClick={handleSubmit}
             disabled={isSubmitting || preview.isOverflow}
-            className="min-h-[50px] w-full rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-98 disabled:opacity-40"
+            className="min-h-[50px] w-full rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-98 disabled:opacity-40 cursor-pointer hover:bg-ink/90"
           >
             {isSubmitting ? '保存中…' : `保存してスケジュールを確定 (No.${rangeStart}〜No.${preview.calculatedEnd})`}
           </button>

@@ -23,7 +23,7 @@ export const WeaknessChunkTile: React.FC<WeaknessChunkTileProps> = ({ chunk, onC
 
   if (!hasAttempts) {
     styleClass = 'border-line/60 bg-white text-ink/40';
-    badgeText = '未受検';
+    badgeText = '未受験';
     badgeStyle = 'bg-line/20 text-ink/40 border-line/40';
   } else if (accuracy < 60) {
     styleClass = 'border-akashiito-border bg-akashiito/10 text-ink shadow-2xs';
@@ -65,7 +65,7 @@ export const WeaknessChunkTile: React.FC<WeaknessChunkTileProps> = ({ chunk, onC
           </span>
         </div>
         <span className="font-maru text-[10px] text-ink/50">
-          {hasAttempts ? `${totalSessionsCount}回受検` : '未受検'}
+          {hasAttempts ? `${totalSessionsCount}回受験` : '未受験'}
         </span>
       </div>
     </button>

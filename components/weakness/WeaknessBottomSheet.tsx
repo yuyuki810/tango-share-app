@@ -17,7 +17,6 @@ function formatDateLabel(dateStr: string): string {
   return `${m}/${d}`;
 }
 
-// グラフ①: 全体正答率 (緑 #639922) / グラフ②: 苦手克服 (紫 #7F77DD) 描画
 function AccuracyLineChart({
   points,
   emptyMessage,
@@ -82,7 +81,6 @@ function AccuracyLineChart({
   return (
     <div className="py-1">
       <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-20 w-full overflow-visible">
-        {/* 目安線 (100%, 50%, 0%) */}
         <line
           x1={paddingX}
           y1={paddingY}
@@ -219,7 +217,7 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
                 </div>
               </div>
               <div className="rounded-2xl border border-line bg-white p-3.5 shadow-xs">
-                <span className="block font-maru text-[11px] text-ink/50">受検回数</span>
+                <span className="block font-maru text-[11px] text-ink/50">受験回数</span>
                 <p className="mt-1 font-mincho text-sm font-bold text-ink leading-snug">
                   全体: <span className="text-base font-number">{chunk.fullHistory.length}</span>回<br />
                   苦手特訓: <span className="text-base font-number">{chunk.drillHistory.length}</span>回
@@ -320,7 +318,6 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
         </div>
       </div>
 
-      {/* チャンク用絞り込みダイアログ */}
       <DrillFilterDialog
         isOpen={isDrillDialogOpen}
         onClose={() => setIsDrillDialogOpen(false)}

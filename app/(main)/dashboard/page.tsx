@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import {
@@ -133,7 +136,6 @@ export default async function DashboardPage() {
           >
             🔍 自己診断
           </Link>
-          {/* ストリークバッジ: ピンク (#F4C0D1 / #9D2248) で分離 */}
           <div className="flex items-center gap-1.5 rounded-full border border-[#F4C0D1] bg-[#FDF2F5] px-3 py-1 font-maru text-xs md:text-sm font-bold text-[#9D2248] shadow-2xs">
             <span>🔥</span>
             <span>{currentStreak}日連続</span>
