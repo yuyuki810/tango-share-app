@@ -44,7 +44,7 @@ export function WeeklyRangeModal({
     initialCustomDayTypes ?? DEFAULT_CUSTOM_DAY_TYPES
   );
   const [rangeStart, setRangeStart] = useState<number>(initialRangeStart ?? 1);
-  const [perDayCount, setPerDayCount] = useState<number>(initialPerDayCount ?? 20);
+  const [perDayCount, setPerDayCount] = useState<number>(initialPerDayCount ?? 50);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -55,7 +55,7 @@ export function WeeklyRangeModal({
   useEffect(() => {
     if (isOpen) {
       setRangeStart(initialRangeStart ?? 1);
-      setPerDayCount(initialPerDayCount ?? 20);
+      setPerDayCount(initialPerDayCount ?? 50);
       setCycleType(initialCycleType ?? 'five_two');
       if (initialCustomDayTypes) {
         setCustomDayTypes(initialCustomDayTypes);

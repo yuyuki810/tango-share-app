@@ -15,6 +15,8 @@ interface WordJudgeCardScreenProps {
   onAllDone?: (results: Array<{ wordId: string; isKnown: boolean }>) => void;
   onFinished?: (resultsMap: Map<string, boolean>) => void;
   title?: string;
+  backUrl?: string;
+  backLabel?: string;
 }
 
 const MAX_STACK_VISIBLE = 3;
@@ -28,6 +30,8 @@ export function WordJudgeCardScreen({
   onAllDone,
   onFinished,
   title,
+  backUrl = '/dashboard',
+  backLabel = 'ダッシュボードへ戻る',
 }: WordJudgeCardScreenProps) {
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
@@ -184,10 +188,10 @@ export function WordJudgeCardScreen({
 
         <div className="pt-6 pb-2">
           <Link
-            href="/dashboard"
+            href={backUrl}
             className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90"
           >
-            ダッシュボードへ戻る
+            {backLabel}
           </Link>
         </div>
       </div>
@@ -326,7 +330,7 @@ export function WordJudgeCardScreen({
               </button>
               <button
                 type="button"
-                onClick={() => router.push('/dashboard')}
+                onClick={() => router.push(backUrl)}
                 className="flex min-h-[44px] flex-1 items-center justify-center rounded-xl bg-ink font-mincho text-xs font-bold text-paper shadow-sm transition active:scale-98 cursor-pointer hover:bg-ink/90"
               >
                 中断する

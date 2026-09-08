@@ -16,6 +16,8 @@ interface TestResultScreenProps {
     detail?: string;
     savedCount?: number;
   };
+  backUrl?: string;
+  backLabel?: string;
 }
 
 export function TestResultScreen({
@@ -24,6 +26,8 @@ export function TestResultScreen({
   wrongCards,
   sessionType,
   saveStatus,
+  backUrl = '/dashboard',
+  backLabel = 'ダッシュボードへ戻る',
 }: TestResultScreenProps) {
   const accuracy = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
   const isPerfect = wrongCards.length === 0;
@@ -131,10 +135,10 @@ export function TestResultScreen({
       {/* フッターアクション */}
       <div className="pt-6 pb-2 space-y-2">
         <Link
-          href="/dashboard"
+          href={backUrl}
           className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90"
         >
-          ダッシュボードへ戻る
+          {backLabel}
         </Link>
         {isDailyCheck && (
           <Link

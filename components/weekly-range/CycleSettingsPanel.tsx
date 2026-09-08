@@ -4,7 +4,7 @@ import type { CycleType, DayType } from '@/lib/assignment/cycleTypes';
 import { DaySequenceEditor } from './DaySequenceEditor';
 
 const START_QUICK_ADDS = [10, 50, 100];
-const PER_DAY_CHIPS = [10, 15, 20, 25, 30, 50];
+const PER_DAY_CHIPS = [20, 30, 40, 50, 75, 100];
 
 export interface LastWeekData {
   rangeStart: number;
@@ -130,7 +130,7 @@ export function CycleSettingsPanel({
       </div>
 
       <div>
-        <p className="mb-1.5 font-maru text-xs font-medium text-ink/60">1日の単語数</p>
+        <p className="mb-1.5 font-maru text-xs font-medium text-ink/60">1日の単語数 (標準50語)</p>
         <div className="flex items-center gap-2">
           <button
             type="button"
