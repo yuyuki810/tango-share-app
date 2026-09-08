@@ -38,7 +38,6 @@ export function TestSessionRunner({
   backLabel = "ダッシュボードへ戻る",
   isRandomOrder = false,
 }: TestSessionRunnerProps) {
-  // ランダム出題時はクライアント側でも確実にシャッフルを適用
   const [cards, setCards] = useState<WordCardData[]>(() =>
     isRandomOrder ? shuffleArray(initialCards) : initialCards
   );
@@ -114,10 +113,9 @@ export function TestSessionRunner({
 
           if (data.mode === "resume" && Array.isArray(data.answeredWords) && data.answeredWords.length > 0) {
             const answeredWords: Array<{ wordId: string; isKnown: boolean }> = data.answeredWords;
+            const targetSet = new Set(currentCardList.map((c) => c.wordId));
             const isValidCount = answeredWords.length < currentCardList.length;
-            const isMatchWords = answeredWords.every(
-              (a, idx) => a.wordId === currentCardList[idx]?.wordId
-            );
+            const isMatchWords = answeredWords.every((a) => targetSet.has(a.wordId));
 
             if (isValidCount && isMatchWords) {
               const answeredMap = new Map<string, boolean>();
@@ -362,7 +360,7 @@ export function TestSessionRunner({
                 onClick={handleRestartFromScratch}
                 className="flex min-h-[44px] w-full items-center justify-center rounded-xl border border-line bg-paper font-maru text-xs font-medium text-ink/70 transition hover:bg-paper-hover active:scale-98 cursor-pointer"
               >
-                最初からやり直す (再シャッフル)
+                最初からやり直す
               </button>
             ) : (
               <p className="font-maru text-[11px] text-ink/40 pt-1">
