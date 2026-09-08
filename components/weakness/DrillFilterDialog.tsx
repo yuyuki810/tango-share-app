@@ -26,7 +26,7 @@ export function DrillFilterDialog({
   if (!isOpen) return null;
 
   const handleStart = () => {
-    let url = "/test?mode=normal";
+    let url = `/test?mode=normal&t=${Date.now()}`;
     if (originAssignmentId) {
       url += `&originAssignmentId=${encodeURIComponent(originAssignmentId)}`;
     } else {

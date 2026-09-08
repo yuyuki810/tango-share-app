@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, RotateCcw, Shuffle } from "lucide-react";
 
 interface TodayRangeCardProps {
@@ -21,6 +21,7 @@ export function TodayRangeCard({
   isDailyCheckCompleted = false,
   hasIncompleteSession = false,
 }: TodayRangeCardProps) {
+  const router = useRouter();
   const hasRange = rangeStart !== null && rangeEnd !== null;
   const wordCount = hasRange ? rangeEnd - rangeStart + 1 : 0;
 
@@ -43,8 +44,14 @@ export function TodayRangeCard({
     } catch {}
   };
 
-  const dailyCheckUrl = `/test?mode=daily_check${isRandom ? "&random=true" : ""}`;
-  const normalTestUrl = `/test?mode=normal${isRandom ? "&random=true" : ""}`;
+  const handleNavigate = (mode: "daily_check" | "normal") => {
+    // 毎回新しいシャッフル順を強制するためにタイムスタンプ(t)を付与
+    let url = `/test?mode=${mode}&t=${Date.now()}`;
+    if (isRandom) {
+      url += "&random=true";
+    }
+    router.push(url);
+  };
 
   return (
     <div className="relative overflow-hidden rounded-3xl border border-line bg-white p-6 shadow-sm">
@@ -136,22 +143,22 @@ export function TodayRangeCard({
 
           {!isDailyCheckCompleted ? (
             <>
-              <Link
-                href={dailyCheckUrl}
-                prefetch={true}
-                className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-[#E24B4A] font-mincho text-base font-bold text-white shadow-md shadow-[#E24B4A]/25 transition active:scale-98 hover:opacity-95"
+              <button
+                type="button"
+                onClick={() => handleNavigate("daily_check")}
+                className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-[#E24B4A] font-mincho text-base font-bold text-white shadow-md shadow-[#E24B4A]/25 transition active:scale-98 hover:opacity-95 cursor-pointer"
               >
                 {hasIncompleteSession && <RotateCcw className="h-4 w-4" />}
                 <span>{hasIncompleteSession ? "前回の続きから再開する" : "今日の本番チェックを受ける"}</span>
-              </Link>
+              </button>
               <div className="text-center pt-0.5">
-                <Link
-                  href={normalTestUrl}
-                  prefetch={true}
-                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl border border-dashed border-line bg-paper/60 px-4 py-2.5 font-maru text-xs font-medium text-ink/70 transition hover:bg-paper hover:text-ink active:scale-98"
+                <button
+                  type="button"
+                  onClick={() => handleNavigate("normal")}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl border border-dashed border-line bg-paper/60 px-4 py-2.5 font-maru text-xs font-medium text-ink/70 transition hover:bg-paper hover:text-ink active:scale-98 cursor-pointer"
                 >
                   本番前の練習テストを受ける（何度でも可能）
-                </Link>
+                </button>
               </div>
             </>
           ) : (
@@ -160,13 +167,13 @@ export function TodayRangeCard({
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
                 <span className="font-mincho text-sm font-bold">本日の本番チェックは受験済みです</span>
               </div>
-              <Link
-                href={normalTestUrl}
-                prefetch={true}
-                className="flex min-h-[48px] w-full items-center justify-center rounded-2xl border border-line bg-paper font-mincho text-sm font-bold text-ink transition hover:bg-paper-hover active:scale-98"
+              <button
+                type="button"
+                onClick={() => handleNavigate("normal")}
+                className="flex min-h-[48px] w-full items-center justify-center rounded-2xl border border-line bg-paper font-mincho text-sm font-bold text-ink transition hover:bg-paper-hover active:scale-98 cursor-pointer"
               >
                 練習テストを受ける（再復習）
-              </Link>
+              </button>
             </>
           )}
         </div>

@@ -1,28 +1,44 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { WordJudgeCardScreen } from '@/components/review/WordJudgeCardScreen';
-import type { WordCardData } from '@/components/review/WordJudgeCard';
-import { ChunkSummaryScreen, type ChunkResultItem } from '@/components/weakness/ChunkSummaryScreen';
-import { TestResultScreen } from '@/components/test/TestResultScreen';
-import type { ReviewChunkSummaryInfo } from '@/lib/test/getTodayTestWords';
-import { RefreshCw, Play, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef } from "react";
+import { WordJudgeCardScreen } from "@/components/review/WordJudgeCardScreen";
+import type { WordCardData } from "@/components/review/WordJudgeCard";
+import { ChunkSummaryScreen, type ChunkResultItem } from "@/components/weakness/ChunkSummaryScreen";
+import { TestResultScreen } from "@/components/test/TestResultScreen";
+import type { ReviewChunkSummaryInfo } from "@/lib/test/getTodayTestWords";
+import { RefreshCw, Play, RotateCcw } from "lucide-react";
+
+function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 interface TestSessionRunnerProps {
   cards: WordCardData[];
   dailyAssignmentId: string | null;
-  sessionType: 'daily_check' | 'normal';
+  sessionType: "daily_check" | "normal";
   isReviewDay?: boolean;
   reviewChunks?: ReviewChunkSummaryInfo[];
+  backUrl?: string;
+  backLabel?: string;
+  isRandomOrder?: boolean;
 }
 
 export function TestSessionRunner({
-  cards,
+  cards: initialCards,
   dailyAssignmentId,
   sessionType,
   isReviewDay = false,
   reviewChunks = [],
+  backUrl = "/dashboard",
+  backLabel = "ダッシュボードへ戻る",
+  isRandomOrder = false,
 }: TestSessionRunnerProps) {
+  const [cards, setCards] = useState<WordCardData[]>(initialCards);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -53,24 +69,23 @@ export function TestSessionRunner({
     isSuccess: false,
   });
 
-  // 1. セッション初期化 (/api/test-sessions/start)
-  useEffect(() => {
-    let isMounted = true;
+  const initSession = (currentCardList: WordCardData[]) => {
     setIsInitializing(true);
+    const cardWordIds = currentCardList.map((c) => c.wordId);
 
-    fetch('/api/test-sessions/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    fetch("/api/test-sessions/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: sessionType,
         dailyAssignmentId,
-        totalCount: cards.length,
+        totalCount: currentCardList.length,
+        wordIds: cardWordIds,
+        isRandomOrder,
       }),
     })
       .then(async (res) => {
         const data = await res.json();
-        if (!isMounted) return;
-
         if (res.ok && data.success) {
           const currentId = data.session.id;
           setSessionId(currentId);
@@ -78,54 +93,71 @@ export function TestSessionRunner({
 
           if (pendingAnswersQueue.current.length > 0) {
             pendingAnswersQueue.current.forEach((item) => {
-              const matchedCard = cards.find((c) => c.wordId === item.wordId);
-              fetch('/api/test-sessions/answer', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+              const matchedCard = currentCardList.find((c) => c.wordId === item.wordId);
+              fetch("/api/test-sessions/answer", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   sessionId: currentId,
                   wordId: item.wordId,
                   isKnown: item.isKnown,
                   originDailyAssignmentId: matchedCard?.originDailyAssignmentId || dailyAssignmentId,
                 }),
-              }).catch((e) => console.error('Queue flush error:', e));
+              }).catch((e) => console.error("Queue flush error:", e));
             });
             pendingAnswersQueue.current = [];
           }
 
-          if (data.mode === 'resume' && data.answeredWords && data.answeredWords.length > 0) {
-            const answeredMap = new Map<string, boolean>();
-            data.answeredWords.forEach((a: any) => {
-              answeredMap.set(a.wordId, a.isKnown);
-            });
+          if (data.mode === "resume" && Array.isArray(data.answeredWords) && data.answeredWords.length > 0) {
+            const answeredWords: Array<{ wordId: string; isKnown: boolean }> = data.answeredWords;
+            const isValidCount = answeredWords.length < currentCardList.length;
+            const isMatchWords = answeredWords.every(
+              (a, idx) => a.wordId === currentCardList[idx]?.wordId
+            );
 
-            if (data.answeredWords.length < cards.length) {
+            if (isValidCount && isMatchWords) {
+              const answeredMap = new Map<string, boolean>();
+              answeredWords.forEach((a) => {
+                answeredMap.set(a.wordId, a.isKnown);
+              });
+
               setResumePrompt({
-                answeredCount: data.answeredWords.length,
+                answeredCount: answeredWords.length,
                 answeredMap,
               });
             } else {
-              setInitialAnswers(answeredMap);
-              setInitialIndex(cards.length);
+              setInitialAnswers(new Map());
+              setInitialIndex(0);
             }
+          } else {
+            setInitialAnswers(new Map());
+            setInitialIndex(0);
           }
-        } else {
-          console.error('Failed to start session:', data.error);
         }
       })
-      .catch((err) => {
-        console.error('Start session request error:', err);
-      })
       .finally(() => {
-        if (isMounted) setIsInitializing(false);
+        setIsInitializing(false);
       });
+  };
 
-    return () => {
-      isMounted = false;
-    };
-  }, [sessionType, dailyAssignmentId, cards.length]);
+  useEffect(() => {
+    setCards(initialCards);
+    initSession(initialCards);
+  }, [sessionType, dailyAssignmentId, initialCards, isRandomOrder]);
 
-  // 2. 単語判定のたびに即座に都度保存
+  // 最初からやり直す (再シャッフル + 新セッション発行)
+  const handleRestartFromScratch = () => {
+    let nextCards = cards;
+    if (isRandomOrder) {
+      nextCards = shuffleArray(cards);
+      setCards(nextCards);
+    }
+    setInitialAnswers(new Map());
+    setInitialIndex(0);
+    setResumePrompt(null);
+    initSession(nextCards);
+  };
+
   const handleSingleJudge = (wordId: string, isKnown: boolean) => {
     const currentId = sessionIdRef.current;
     const matchedCard = cards.find((c) => c.wordId === wordId);
@@ -135,9 +167,9 @@ export function TestSessionRunner({
       return;
     }
 
-    fetch('/api/test-sessions/answer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    fetch("/api/test-sessions/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: currentId,
         wordId,
@@ -145,19 +177,18 @@ export function TestSessionRunner({
         originDailyAssignmentId: matchedCard?.originDailyAssignmentId || dailyAssignmentId,
       }),
     }).catch((err) => {
-      console.error('Answer streaming error:', err);
+      console.error("Answer streaming error:", err);
     });
   };
 
-  // 3. 一つ前の回答修正ハンドラー (/api/test-sessions/modify-answer)
   const handleModifyJudge = async (wordId: string, isKnown: boolean) => {
     const currentId = sessionIdRef.current;
     if (!currentId) return;
 
     try {
-      const res = await fetch('/api/test-sessions/modify-answer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/test-sessions/modify-answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: currentId,
           wordId,
@@ -166,14 +197,13 @@ export function TestSessionRunner({
       });
       const data = await res.json();
       if (!res.ok) {
-        console.error('Failed to modify answer:', data.error);
+        console.error("Failed to modify answer:", data.error);
       }
     } catch (err) {
-      console.error('Modify answer request error:', err);
+      console.error("Modify answer request error:", err);
     }
   };
 
-  // 4. 全問終了時のセッション完了確定処理 (正答率ベースでサマリー判定)
   const handleFinished = (resultsMap: Map<string, boolean>) => {
     const currentId = sessionIdRef.current;
     const results = cards.map((c) => ({
@@ -191,7 +221,7 @@ export function TestSessionRunner({
         const chunkCards = cards.filter(
           (c) =>
             c.originDailyAssignmentId === rc.chunkId ||
-            (typeof c.number === 'number' &&
+            (typeof c.number === "number" &&
               c.number >= rc.rangeStart &&
               c.number <= rc.rangeEnd)
         );
@@ -199,18 +229,18 @@ export function TestSessionRunner({
         const cCorrect = chunkCards.filter((c) => resultsMap.get(c.wordId) ?? false).length;
         const cAccuracy = cTotal > 0 ? Math.round((cCorrect / cTotal) * 100) : 0;
 
-        let status: 'improved' | 'same' | 'worse' | 'first' = 'first';
+        let status: "improved" | "same" | "worse" | "first" = "first";
         if (rc.prevAccuracyRate !== null) {
           const diff = cAccuracy - rc.prevAccuracyRate;
           if (diff >= 10) {
-            status = 'improved';
+            status = "improved";
           } else if (diff <= -10) {
-            status = 'worse';
+            status = "worse";
           } else {
-            status = 'same';
+            status = "same";
           }
         } else {
-          status = 'first';
+          status = "first";
         }
 
         return {
@@ -242,9 +272,9 @@ export function TestSessionRunner({
 
     setSaveStatus({ isSaving: true, isSuccess: false });
 
-    fetch('/api/test-sessions/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    fetch("/api/test-sessions/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: currentId,
         results,
@@ -262,17 +292,17 @@ export function TestSessionRunner({
           setSaveStatus({
             isSaving: false,
             isSuccess: false,
-            errorMessage: data.error || '保存エラー',
+            errorMessage: data.error || "保存エラー",
             detail: data.detail || `HTTP ${res.status}`,
           });
         }
       })
       .catch((err) => {
-        console.error('Error completing test session:', err);
+        console.error("Error completing test session:", err);
         setSaveStatus({
           isSaving: false,
           isSuccess: false,
-          errorMessage: '通信エラー',
+          errorMessage: "通信エラー",
           detail: err?.message || String(err),
         });
       });
@@ -288,7 +318,7 @@ export function TestSessionRunner({
   }
 
   if (resumePrompt) {
-    const isDailyCheck = sessionType === 'daily_check';
+    const isDailyCheck = sessionType === "daily_check";
     return (
       <div className="mx-auto flex min-h-[85vh] max-w-md md:max-w-xl flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200 select-none">
         <div className="w-full rounded-3xl border border-line bg-white p-6 shadow-sm space-y-4">
@@ -325,14 +355,10 @@ export function TestSessionRunner({
             {!isDailyCheck ? (
               <button
                 type="button"
-                onClick={() => {
-                  setInitialAnswers(new Map());
-                  setInitialIndex(0);
-                  setResumePrompt(null);
-                }}
+                onClick={handleRestartFromScratch}
                 className="flex min-h-[44px] w-full items-center justify-center rounded-xl border border-line bg-paper font-maru text-xs font-medium text-ink/70 transition hover:bg-paper-hover active:scale-98 cursor-pointer"
               >
-                最初からやり直す
+                最初からやり直す (再シャッフル)
               </button>
             ) : (
               <p className="font-maru text-[11px] text-ink/40 pt-1">
@@ -363,6 +389,8 @@ export function TestSessionRunner({
         wrongCards={resultData.wrongCards}
         sessionType={sessionType}
         saveStatus={saveStatus}
+        backUrl={backUrl}
+        backLabel={backLabel}
       />
     );
   }
@@ -375,7 +403,9 @@ export function TestSessionRunner({
       onJudge={handleSingleJudge}
       onModifyJudge={handleModifyJudge}
       onFinished={handleFinished}
-      title={sessionType === 'daily_check' ? '本日のテスト結果' : '苦手克服テスト結果'}
+      title={sessionType === "daily_check" ? "本日のテスト結果" : "苦手克服テスト結果"}
+      backUrl={backUrl}
+      backLabel={backLabel}
     />
   );
 }
