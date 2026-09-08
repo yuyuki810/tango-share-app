@@ -6,7 +6,7 @@ import type { WordCardData } from "@/components/review/WordJudgeCard";
 import { ChunkSummaryScreen, type ChunkResultItem } from "@/components/weakness/ChunkSummaryScreen";
 import { TestResultScreen } from "@/components/test/TestResultScreen";
 import type { ReviewChunkSummaryInfo } from "@/lib/test/getTodayTestWords";
-import { RefreshCw, Play, RotateCcw } from "lucide-react";
+import { RefreshCw, Play, RotateCcw, Shuffle, Layers, Info } from "lucide-react";
 
 function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];
@@ -28,6 +28,12 @@ interface TestSessionRunnerProps {
   isRandomOrder?: boolean;
 }
 
+interface ResumeState {
+  answeredCount: number;
+  answeredMap: Map<string, boolean>;
+  sessionIsRandom: boolean;
+}
+
 export function TestSessionRunner({
   cards: initialCards,
   dailyAssignmentId,
@@ -45,10 +51,7 @@ export function TestSessionRunner({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [resumePrompt, setResumePrompt] = useState<{
-    answeredCount: number;
-    answeredMap: Map<string, boolean>;
-  } | null>(null);
+  const [resumePrompt, setResumePrompt] = useState<ResumeState | null>(null);
 
   const [initialIndex, setInitialIndex] = useState(0);
   const [initialAnswers, setInitialAnswers] = useState<Map<string, boolean>>(new Map());
@@ -72,7 +75,7 @@ export function TestSessionRunner({
     isSuccess: false,
   });
 
-  const initSession = (currentCardList: WordCardData[]) => {
+  const initSession = (currentCardList: WordCardData[], forceNew = false) => {
     setIsInitializing(true);
     const cardWordIds = currentCardList.map((c) => c.wordId);
 
@@ -85,6 +88,7 @@ export function TestSessionRunner({
         totalCount: currentCardList.length,
         wordIds: cardWordIds,
         isRandomOrder,
+        forceNew,
       }),
     })
       .then(async (res) => {
@@ -126,6 +130,7 @@ export function TestSessionRunner({
               setResumePrompt({
                 answeredCount: answeredWords.length,
                 answeredMap,
+                sessionIsRandom: !!data.isRandomOrder,
               });
             } else {
               setInitialAnswers(new Map());
@@ -145,19 +150,19 @@ export function TestSessionRunner({
   useEffect(() => {
     const list = isRandomOrder ? shuffleArray(initialCards) : initialCards;
     setCards(list);
-    initSession(list);
+    initSession(list, false);
   }, [sessionType, dailyAssignmentId, initialCards, isRandomOrder]);
 
   const handleRestartFromScratch = () => {
-    let nextCards = cards;
+    let nextCards = initialCards;
     if (isRandomOrder) {
-      nextCards = shuffleArray(cards);
-      setCards(nextCards);
+      nextCards = shuffleArray(initialCards);
     }
+    setCards(nextCards);
     setInitialAnswers(new Map());
     setInitialIndex(0);
     setResumePrompt(null);
-    initSession(nextCards);
+    initSession(nextCards, true);
   };
 
   const handleSingleJudge = (wordId: string, isKnown: boolean) => {
@@ -321,6 +326,10 @@ export function TestSessionRunner({
 
   if (resumePrompt) {
     const isDailyCheck = sessionType === "daily_check";
+    const sessionModeName = resumePrompt.sessionIsRandom ? "ランダム出題" : "通常順 (No.順)";
+    const currentModeName = isRandomOrder ? "ランダム出題" : "通常順 (No.順)";
+    const isModeMismatch = resumePrompt.sessionIsRandom !== isRandomOrder;
+
     return (
       <div className="mx-auto flex min-h-[85vh] max-w-md md:max-w-xl flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200 select-none">
         <div className="w-full rounded-3xl border border-line bg-white p-6 shadow-sm space-y-4">
@@ -333,14 +342,35 @@ export function TestSessionRunner({
               前回の続きから再開しますか？
             </h2>
             <p className="mt-1.5 font-maru text-xs text-ink/60 leading-relaxed">
-              前回の中断データが見つかりました。<br />
+              中断した学習データが見つかりました。<br />
               <strong className="text-ink font-bold">
                 {resumePrompt.answeredCount} / {cards.length} 語
               </strong> まで回答済みです。
             </p>
           </div>
 
-          <div className="space-y-2 pt-2">
+          <div className="rounded-2xl bg-paper/70 border border-line/70 p-3.5 text-left space-y-1.5 font-maru text-xs">
+            <div className="flex items-center gap-1.5 font-bold text-ink">
+              <Info className="h-3.5 w-3.5 text-amber-600" />
+              <span>{isDailyCheck ? "本番チェックの出題ルール" : "出題モードの確認"}</span>
+            </div>
+
+            {isDailyCheck ? (
+              <p className="text-ink/70 leading-relaxed text-[11px]">
+                本番チェックは1日1回限定のため、開始時と同じ <strong>「{sessionModeName}」</strong> のまま続きから解き進めます。
+              </p>
+            ) : isModeMismatch ? (
+              <p className="text-ink/70 leading-relaxed text-[11px]">
+                前回は <strong>「{sessionModeName}」</strong> で中断しました（現在の選択: <strong>{currentModeName}</strong>）。前回の設定で続きを解くか、現在の設定で1問目からやり直すかを選べます。
+              </p>
+            ) : (
+              <p className="text-ink/70 leading-relaxed text-[11px]">
+                出題モード: <strong>{sessionModeName}</strong>（中断前の設定と一致しています）
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2 pt-1">
             <button
               type="button"
               onClick={() => {
@@ -351,21 +381,18 @@ export function TestSessionRunner({
               className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-sm transition active:scale-98 cursor-pointer hover:bg-ink/90"
             >
               <Play className="h-4 w-4 fill-paper" />
-              <span>続きから再開する（{resumePrompt.answeredCount + 1}問目〜）</span>
+              <span>前回の続きから再開する（{resumePrompt.answeredCount + 1}問目〜）</span>
             </button>
 
-            {!isDailyCheck ? (
+            {!isDailyCheck && (
               <button
                 type="button"
                 onClick={handleRestartFromScratch}
-                className="flex min-h-[44px] w-full items-center justify-center rounded-xl border border-line bg-paper font-maru text-xs font-medium text-ink/70 transition hover:bg-paper-hover active:scale-98 cursor-pointer"
+                className="flex min-h-[46px] w-full items-center justify-center gap-1.5 rounded-xl border border-line bg-paper font-maru text-xs font-bold text-ink/80 transition hover:bg-paper-hover active:scale-98 cursor-pointer"
               >
-                最初からやり直す
+                {isRandomOrder ? <Shuffle className="h-3.5 w-3.5 text-akashiito" /> : <Layers className="h-3.5 w-3.5 text-ink/60" />}
+                <span>現在の設定（{currentModeName}）で最初から始める</span>
               </button>
-            ) : (
-              <p className="font-maru text-[11px] text-ink/40 pt-1">
-                ※ 本番チェックは1日1回限定のため、続きからのみ受験可能です
-              </p>
             )}
           </div>
         </div>

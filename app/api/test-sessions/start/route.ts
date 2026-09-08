@@ -15,7 +15,14 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { type = "normal", dailyAssignmentId = null, totalCount = 0, wordIds = [], isRandomOrder = false } = body;
+    const {
+      type = "normal",
+      dailyAssignmentId = null,
+      totalCount = 0,
+      wordIds = [],
+      isRandomOrder = false,
+      forceNew = false,
+    } = body;
     const today = getTodayJST();
 
     if (type === "daily_check") {
@@ -39,60 +46,66 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 未完了セッションを検索
-    let incompleteQuery = supabase
-      .from("test_sessions")
-      .select("id, type, date, total_count, correct_count, created_at, is_random_order")
-      .eq("user_id", user.id)
-      .eq("type", type)
-      .is("completed_at", null);
+    if (forceNew) {
+      const nowIso = new Date().toISOString();
+      await supabase
+        .from("test_sessions")
+        .update({ completed_at: nowIso })
+        .eq("user_id", user.id)
+        .eq("type", type)
+        .is("completed_at", null);
+    } else {
+      let incompleteQuery = supabase
+        .from("test_sessions")
+        .select("id, type, date, total_count, correct_count, created_at, is_random_order")
+        .eq("user_id", user.id)
+        .eq("type", type)
+        .is("completed_at", null);
 
-    if (type === "daily_check") {
-      incompleteQuery = incompleteQuery.eq("date", today);
-    }
+      if (type === "daily_check") {
+        incompleteQuery = incompleteQuery.eq("date", today);
+      }
 
-    const { data: incompleteSession } = await incompleteQuery
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      const { data: incompleteSession } = await incompleteQuery
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (incompleteSession) {
-      const { data: answers } = await supabase
-        .from("test_answers")
-        .select("word_id, is_known, origin_daily_assignment_id, created_at")
-        .eq("session_id", incompleteSession.id)
-        .order("created_at", { ascending: true });
+      if (incompleteSession) {
+        const { data: answers } = await supabase
+          .from("test_answers")
+          .select("word_id, is_known, origin_daily_assignment_id, created_at")
+          .eq("session_id", incompleteSession.id)
+          .order("created_at", { ascending: true });
 
-      const answeredList = answers ?? [];
+        const answeredList = answers ?? [];
 
-      // 安全な再開判定:
-      // 1. 回答数が 1件以上かつ 全問未満
-      // 2. 回答された単語がすべて今回の出題単語セット(wordIds)に含まれている
-      let isValidResume = false;
-      if (answeredList.length > 0 && totalCount > 0 && answeredList.length < totalCount) {
-        if (Array.isArray(wordIds) && wordIds.length > 0) {
-          const targetWordIdSet = new Set(wordIds);
-          isValidResume = answeredList.every((a) => targetWordIdSet.has(a.word_id));
-        } else {
-          isValidResume = true;
+        let isValidResume = false;
+        if (answeredList.length > 0 && totalCount > 0 && answeredList.length < totalCount) {
+          if (Array.isArray(wordIds) && wordIds.length > 0) {
+            const targetWordIdSet = new Set(wordIds);
+            isValidResume = answeredList.every((a) => targetWordIdSet.has(a.word_id));
+          } else {
+            isValidResume = true;
+          }
+        }
+
+        if (isValidResume) {
+          return NextResponse.json({
+            success: true,
+            mode: "resume",
+            session: incompleteSession,
+            isRandomOrder: !!incompleteSession.is_random_order,
+            answeredWords: answeredList.map((a) => ({
+              wordId: a.word_id,
+              isKnown: a.is_known,
+              originDailyAssignmentId: a.origin_daily_assignment_id,
+            })),
+          });
         }
       }
-
-      if (isValidResume) {
-        return NextResponse.json({
-          success: true,
-          mode: "resume",
-          session: incompleteSession,
-          answeredWords: answeredList.map((a) => ({
-            wordId: a.word_id,
-            isKnown: a.is_known,
-            originDailyAssignmentId: a.origin_daily_assignment_id,
-          })),
-        });
-      }
     }
 
-    // 新規セッション作成
     const { data: newSession, error: createError } = await supabase
       .from("test_sessions")
       .insert({
@@ -124,6 +137,7 @@ export async function POST(req: NextRequest) {
       success: true,
       mode: "new",
       session: newSession,
+      isRandomOrder: !!newSession.is_random_order,
       answeredWords: [],
     });
   } catch (err: any) {
