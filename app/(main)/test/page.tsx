@@ -1,5 +1,3 @@
-'use client';
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -94,7 +92,7 @@ export default async function TestPage({ searchParams }: TestPageProps) {
     return (
       <main className="mx-auto h-[100dvh] max-w-md md:max-w-xl lg:max-w-2xl bg-paper">
         <TestSessionRunner
-          key={`weak-chunk-${params.originAssignmentId}-${isRandomOrder}-${Date.now()}`}
+          key={`weak-chunk-${params.originAssignmentId}-${isRandomOrder}`}
           cards={weakCards}
           dailyAssignmentId={params.originAssignmentId}
           sessionType="normal"
@@ -137,7 +135,7 @@ export default async function TestPage({ searchParams }: TestPageProps) {
     return (
       <main className="mx-auto h-[100dvh] max-w-md md:max-w-xl lg:max-w-2xl bg-paper">
         <TestSessionRunner
-          key={`weak-all-${isRandomOrder}-${Date.now()}`}
+          key={`weak-all-${isRandomOrder}`}
           cards={weakCards}
           dailyAssignmentId={null}
           sessionType="normal"
@@ -220,7 +218,7 @@ export default async function TestPage({ searchParams }: TestPageProps) {
   return (
     <main className="mx-auto h-[100dvh] max-w-md md:max-w-xl lg:max-w-2xl bg-paper">
       <TestSessionRunner
-        key={`daily-${context.dailyAssignmentId}-${isRandomOrder}-${Date.now()}`}
+        key={`daily-${context.dailyAssignmentId}-${isRandomOrder}`}
         cards={finalCards}
         dailyAssignmentId={context.dailyAssignmentId}
         sessionType={sessionType}
