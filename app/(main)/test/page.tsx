@@ -1,53 +1,71 @@
-export const dynamic = 'force-dynamic';
+'use client';
+
+export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-import { redirect } from 'next/navigation';
-import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
-import { getTodayJST } from '@/lib/assignment/weekDates';
-import { getTodayTestContext } from '@/lib/test/getTodayTestWords';
-import { getWeakWords } from '@/lib/weakness/getWeakWords';
-import { TestSessionRunner } from '@/components/test/TestSessionRunner';
-import { CheckCircle2 } from 'lucide-react';
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { getTodayJST } from "@/lib/assignment/weekDates";
+import { getTodayTestContext } from "@/lib/test/getTodayTestWords";
+import { getWeakWords } from "@/lib/weakness/getWeakWords";
+import { TestSessionRunner } from "@/components/test/TestSessionRunner";
+import { CheckCircle2 } from "lucide-react";
+
+function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 interface TestPageProps {
   searchParams: Promise<{
     mode?: string;
     originAssignmentId?: string;
     weak?: string;
-    filter?: 'all' | 'mistakes' | 'recent';
+    filter?: "all" | "mistakes" | "recent";
     limit?: string;
     days?: string;
+    random?: string;
+    t?: string;
   }>;
 }
 
 export default async function TestPage({ searchParams }: TestPageProps) {
   const params = await searchParams;
-  const sessionType = params.mode === 'daily_check' ? 'daily_check' : 'normal';
+  const sessionType = params.mode === "daily_check" ? "daily_check" : "normal";
 
-  const filterMode = params.filter || 'all';
+  const filterMode = params.filter || "all";
   const filterLimit = params.limit ? Number(params.limit) : undefined;
   const filterDays = params.days ? Number(params.days) : undefined;
+  const isRandomOrder = params.random === "true";
+
+  const isFromWeakness = !!params.originAssignmentId || params.weak === "true";
+  const backUrl = isFromWeakness ? "/weakness" : "/dashboard";
+  const backLabel = isFromWeakness ? "弱点マップへ戻る" : "ダッシュボードへ戻る";
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  if (!user) redirect("/login");
 
   const { data: profile } = await supabase
-    .from('users')
-    .select('wordbook_id')
-    .eq('id', user.id)
+    .from("users")
+    .select("wordbook_id")
+    .eq("id", user.id)
     .single();
 
   if (!profile?.wordbook_id) {
-    redirect('/dashboard');
+    redirect("/dashboard");
   }
 
   // 1. チャンク指定の苦手克服テスト
   if (params.originAssignmentId) {
-    const weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {
+    let weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {
       chunkId: params.originAssignmentId,
       filterMode,
       limit: filterLimit,
@@ -69,21 +87,29 @@ export default async function TestPage({ searchParams }: TestPageProps) {
       );
     }
 
+    if (isRandomOrder) {
+      weakCards = shuffleArray(weakCards);
+    }
+
     return (
       <main className="mx-auto h-[100dvh] max-w-md md:max-w-xl lg:max-w-2xl bg-paper">
         <TestSessionRunner
+          key={`weak-chunk-${params.originAssignmentId}-${isRandomOrder}-${Date.now()}`}
           cards={weakCards}
           dailyAssignmentId={params.originAssignmentId}
           sessionType="normal"
           isReviewDay={false}
+          backUrl={backUrl}
+          backLabel={backLabel}
+          isRandomOrder={isRandomOrder}
         />
       </main>
     );
   }
 
   // 2. 単語帳全体の苦手克服テスト
-  if (params.weak === 'true') {
-    const weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {
+  if (params.weak === "true") {
+    let weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {
       filterMode,
       limit: filterLimit,
       days: filterDays,
@@ -95,22 +121,30 @@ export default async function TestPage({ searchParams }: TestPageProps) {
           <p className="font-mincho text-lg text-ink">条件に該当する苦手な単語はありません！</p>
           <p className="font-maru text-xs text-ink/60">日々の学習が成果に繋がっています。</p>
           <Link
-            href="/dashboard"
+            href="/weakness"
             className="rounded-xl border border-line bg-white px-4 py-2 text-xs text-ink shadow-sm font-maru"
           >
-            ダッシュボードへ戻る
+            弱点マップへ戻る
           </Link>
         </main>
       );
     }
 
+    if (isRandomOrder) {
+      weakCards = shuffleArray(weakCards);
+    }
+
     return (
       <main className="mx-auto h-[100dvh] max-w-md md:max-w-xl lg:max-w-2xl bg-paper">
         <TestSessionRunner
+          key={`weak-all-${isRandomOrder}-${Date.now()}`}
           cards={weakCards}
           dailyAssignmentId={null}
           sessionType="normal"
           isReviewDay={false}
+          backUrl={backUrl}
+          backLabel={backLabel}
+          isRandomOrder={isRandomOrder}
         />
       </main>
     );
@@ -118,14 +152,14 @@ export default async function TestPage({ searchParams }: TestPageProps) {
 
   const today = getTodayJST();
 
-  // 3. 本番デイリーチェックの完了済み重複受験ガード
-  if (sessionType === 'daily_check') {
+  // 3. 本番デイリーチェック重複ガード
+  if (sessionType === "daily_check") {
     const { data: existingSession } = await supabase
-      .from('test_sessions')
-      .select('id, completed_at')
-      .eq('user_id', user.id)
-      .eq('date', today)
-      .eq('type', 'daily_check')
+      .from("test_sessions")
+      .select("id, completed_at")
+      .eq("user_id", user.id)
+      .eq("date", today)
+      .eq("type", "daily_check")
       .maybeSingle();
 
     if (existingSession && existingSession.completed_at) {
@@ -178,14 +212,23 @@ export default async function TestPage({ searchParams }: TestPageProps) {
     );
   }
 
+  let finalCards = context.cards;
+  if (isRandomOrder) {
+    finalCards = shuffleArray(finalCards);
+  }
+
   return (
     <main className="mx-auto h-[100dvh] max-w-md md:max-w-xl lg:max-w-2xl bg-paper">
       <TestSessionRunner
-        cards={context.cards}
+        key={`daily-${context.dailyAssignmentId}-${isRandomOrder}-${Date.now()}`}
+        cards={finalCards}
         dailyAssignmentId={context.dailyAssignmentId}
         sessionType={sessionType}
         isReviewDay={context.isReviewDay}
         reviewChunks={context.reviewChunks}
+        backUrl={backUrl}
+        backLabel={backLabel}
+        isRandomOrder={isRandomOrder}
       />
     </main>
   );

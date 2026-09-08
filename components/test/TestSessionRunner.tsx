@@ -38,7 +38,11 @@ export function TestSessionRunner({
   backLabel = "ダッシュボードへ戻る",
   isRandomOrder = false,
 }: TestSessionRunnerProps) {
-  const [cards, setCards] = useState<WordCardData[]>(initialCards);
+  // ランダム出題時はクライアント側でも確実にシャッフルを適用
+  const [cards, setCards] = useState<WordCardData[]>(() =>
+    isRandomOrder ? shuffleArray(initialCards) : initialCards
+  );
+
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -141,11 +145,11 @@ export function TestSessionRunner({
   };
 
   useEffect(() => {
-    setCards(initialCards);
-    initSession(initialCards);
+    const list = isRandomOrder ? shuffleArray(initialCards) : initialCards;
+    setCards(list);
+    initSession(list);
   }, [sessionType, dailyAssignmentId, initialCards, isRandomOrder]);
 
-  // 最初からやり直す (再シャッフル + 新セッション発行)
   const handleRestartFromScratch = () => {
     let nextCards = cards;
     if (isRandomOrder) {
@@ -397,6 +401,7 @@ export function TestSessionRunner({
 
   return (
     <WordJudgeCardScreen
+      key={`judge-${cards[0]?.wordId || 0}-${cards.length}`}
       cards={cards}
       initialIndex={initialIndex}
       initialAnswers={initialAnswers}
