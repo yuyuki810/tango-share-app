@@ -222,8 +222,7 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
         opacity: exitDirection ? 0 : 1,
         backfaceVisibility: 'hidden',
         WebkitBackfaceVisibility: 'hidden',
-        touchAction: 'manipulation',
-      }}
+              }}
       className={`absolute inset-0 flex select-none flex-col justify-between rounded-3xl border border-line bg-white p-6 md:p-8 lg:p-10 shadow-lg touch-none ${
         !isRevealed && isTop ? 'cursor-pointer' : ''
       } ${

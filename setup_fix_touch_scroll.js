@@ -1,4 +1,359 @@
-'use client';
+const fs = require('fs');
+const path = require('path');
+
+function writeFile(filePath, content) {
+  const fullPath = path.join(__dirname, filePath);
+  fs.writeFileSync(fullPath, content.trim() + '\n', 'utf8');
+  console.log(`[Fixed] ${filePath}`);
+}
+
+// 1. components/review/WordJudgeCard.tsx
+writeFile(
+  'components/review/WordJudgeCard.tsx',
+  `'use client';
+
+import { useState, useRef, useEffect, useCallback, type PointerEvent as ReactPointerEvent } from 'react';
+
+export interface WordCardData {
+  wordId: string;
+  headword: string;
+  pronunciation?: string;
+  meaning: string;
+  exampleSentence?: string;
+  studyCount: number;
+  originDailyAssignmentId?: string;
+  number?: number;
+}
+
+interface WordJudgeCardProps {
+  card: WordCardData;
+  isTop: boolean;
+  stackOffset: number;
+  onJudge: (isKnown: boolean) => void;
+}
+
+const SWIPE_THRESHOLD_RATIO = 0.25;
+
+function getHeadwordFontSize(word: string): string {
+  const len = word.length;
+  if (len <= 8) return 'text-5xl sm:text-6xl lg:text-7xl';
+  if (len <= 12) return 'text-4xl sm:text-5xl lg:text-6xl';
+  if (len <= 16) return 'text-3xl sm:text-4xl lg:text-5xl';
+  return 'text-2xl sm:text-3xl lg:text-4xl';
+}
+
+export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCardProps) {
+  const [isRevealed, setIsRevealed] = useState(false);
+  const [dragX, setDragX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [exitDirection, setExitDirection] = useState<'left' | 'right' | null>(null);
+
+  const dragStartX = useRef<number | null>(null);
+  const dragStartY = useRef<number | null>(null);
+  const isPointerDown = useRef<boolean>(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const handleReveal = useCallback(() => {
+    if (!isRevealed) {
+      setIsRevealed(true);
+    }
+  }, [isRevealed]);
+
+  const commitJudge = useCallback(
+    (isKnown: boolean) => {
+      if (exitDirection !== null) return;
+      setExitDirection(isKnown ? 'right' : 'left');
+      setTimeout(() => onJudge(isKnown), 200);
+    },
+    [exitDirection, onJudge]
+  );
+
+  useEffect(() => {
+    if (!isTop || exitDirection !== null) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const code = e.code;
+      const key = e.key;
+
+      if (
+        code === 'Space' ||
+        code === 'ArrowUp' ||
+        code === 'KeyW' ||
+        key === ' ' ||
+        key === 'ArrowUp' ||
+        key === 'w' ||
+        key === 'W' ||
+        key === 'Enter'
+      ) {
+        e.preventDefault();
+        handleReveal();
+        return;
+      }
+
+      if (
+        code === 'ArrowLeft' ||
+        code === 'KeyA' ||
+        key === 'ArrowLeft' ||
+        key === 'a' ||
+        key === 'A'
+      ) {
+        e.preventDefault();
+        commitJudge(false);
+        return;
+      }
+
+      if (
+        code === 'ArrowRight' ||
+        code === 'KeyD' ||
+        code === 'KeyS' ||
+        key === 'ArrowRight' ||
+        key === 'd' ||
+        key === 'D' ||
+        key === 's' ||
+        key === 'S'
+      ) {
+        e.preventDefault();
+        commitJudge(true);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isTop, exitDirection, handleReveal, commitJudge]);
+
+  const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isTop || exitDirection !== null) return;
+    if ((e.target as HTMLElement).closest('button[data-action="judge"]')) return;
+
+    dragStartX.current = e.clientX;
+    dragStartY.current = e.clientY;
+    isPointerDown.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isPointerDown.current || dragStartX.current === null) return;
+
+    const deltaX = e.clientX - dragStartX.current;
+    const deltaY = e.clientY - (dragStartY.current ?? e.clientY);
+
+    if (!isRevealed) return;
+
+    if (!isDragging && Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      setIsDragging(true);
+    }
+
+    if (isDragging) {
+      setDragX(deltaX);
+    }
+  };
+
+  const handlePointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isPointerDown.current) return;
+
+    const deltaX = dragStartX.current !== null ? e.clientX - dragStartX.current : 0;
+    const deltaY = dragStartY.current !== null ? e.clientY - dragStartY.current : 0;
+    const isTap = Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10;
+
+    if (!isRevealed && isTap) {
+      handleReveal();
+    } else if (isRevealed && isDragging) {
+      const width = cardRef.current?.offsetWidth ?? 320;
+      if (Math.abs(dragX) > width * SWIPE_THRESHOLD_RATIO) {
+        commitJudge(dragX > 0);
+      } else {
+        setDragX(0);
+      }
+    } else {
+      setDragX(0);
+    }
+
+    dragStartX.current = null;
+    dragStartY.current = null;
+    isPointerDown.current = false;
+    setIsDragging(false);
+
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handlePointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    dragStartX.current = null;
+    dragStartY.current = null;
+    isPointerDown.current = false;
+    setIsDragging(false);
+    setDragX(0);
+
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const studyCountLabel = card.studyCount === 0 ? 'はじめての単語' : `${card.studyCount}回目`;
+  const headwordFontSize = getHeadwordFontSize(card.headword);
+
+  const transform = isTop
+    ? exitDirection
+      ? `translateX(${exitDirection === 'right' ? 550 : -550}px) rotate(${exitDirection === 'right' ? 10 : -10}deg)`
+      : `translateX(${dragX}px) rotate(${dragX * 0.02}deg)`
+    : 'none';
+
+  return (
+    <div
+      ref={cardRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      style={{
+        transform,
+        zIndex: 10 - stackOffset,
+        opacity: exitDirection ? 0 : 1,
+        backfaceVisibility: 'hidden',
+        WebkitBackfaceVisibility: 'hidden',
+      }}
+      className={`absolute inset-0 flex select-none flex-col justify-between rounded-3xl border border-line bg-white p-6 md:p-8 lg:p-10 shadow-lg touch-none ${
+        !isRevealed && isTop ? 'cursor-pointer' : ''
+      } ${
+        isTop && !isDragging
+          ? 'transition-[transform,opacity] duration-200 motion-reduce:transition-none'
+          : 'transition-none'
+      }`}
+    >
+      {/* 1. 学習回数バッジ & 単語番号 */}
+      <div className="flex justify-between items-center select-none pointer-events-none">
+        <span className="rounded-full border border-line bg-paper px-3 py-1 text-xs md:text-sm text-ink/60 font-maru">
+          {studyCountLabel}
+        </span>
+        {card.number && (
+          <span className="font-mono text-xs text-ink/40 select-none">
+            No.{card.number}
+          </span>
+        )}
+      </div>
+
+      {/* ドラッグ中のスタンプ表示 */}
+      {isTop && isRevealed && dragX !== 0 && (
+        <div
+          style={{ opacity: Math.min(Math.abs(dragX) / 100, 1) }}
+          className={`pointer-events-none select-none absolute top-16 z-20 rounded-xl border-2 px-4 py-1.5 text-sm md:text-base font-bold shadow-sm ${
+            dragX > 0
+              ? 'right-6 md:right-10 -rotate-12 border-ink text-ink bg-white/90'
+              : 'left-6 md:left-10 rotate-12 border-ink/60 text-ink/60 bg-white/90'
+          }`}
+        >
+          {dragX > 0 ? 'わかった' : 'わからなかった'}
+        </div>
+      )}
+
+      {/* 2. 単語本体 */}
+      <div className="my-auto flex w-full flex-col items-center justify-center gap-2 py-4 text-center select-none pointer-events-none">
+        <p
+          className={`w-full font-mincho font-bold text-ink tracking-tight whitespace-nowrap leading-normal py-2 select-none ${headwordFontSize}`}
+        >
+          {card.headword}
+        </p>
+        {card.pronunciation ? (
+          <p className="font-maru text-lg sm:text-xl md:text-2xl text-ink/75 tracking-wider select-none">
+            /{card.pronunciation}/
+          </p>
+        ) : (
+          <div className="h-7" />
+        )}
+      </div>
+
+      {/* 3. 下部エリア */}
+      <div className="flex flex-col gap-3 md:gap-4 select-none">
+        <div className="relative h-24 md:h-28 overflow-hidden rounded-2xl select-none">
+          <div className="flex h-full flex-col items-center justify-center rounded-2xl border border-line bg-paper p-3 md:p-4 text-center select-none">
+            <p className="font-maru text-base md:text-lg font-bold text-ink leading-snug select-none">
+              {card.meaning}
+            </p>
+            {card.exampleSentence && (
+              <p className="mt-1 font-maru text-xs md:text-sm text-ink/50 line-clamp-1 select-none">
+                {card.exampleSentence}
+              </p>
+            )}
+          </div>
+
+          <div
+            style={{
+              transform: isRevealed ? 'translateX(105%) rotate(6deg)' : 'translateX(0)',
+            }}
+            className={`absolute inset-0 flex items-center justify-center rounded-2xl bg-akashiito text-sm md:text-base font-bold text-paper shadow-inner transition-transform duration-300 ease-out motion-reduce:transition-none select-none ${
+              isRevealed ? 'pointer-events-none' : ''
+            }`}
+          >
+            タップして確認
+          </div>
+        </div>
+
+        {/* 4. 判定ボタン */}
+        <div
+          className={`flex gap-3 md:gap-4 transition-opacity duration-200 select-none ${
+            isRevealed && isTop ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          <button
+            type="button"
+            data-action="judge"
+            tabIndex={isRevealed && isTop ? 0 : -1}
+            onClick={(e) => {
+              e.stopPropagation();
+              commitJudge(false);
+            }}
+            className="min-h-[56px] md:min-h-[60px] flex-1 rounded-2xl border border-line bg-white font-medium text-ink/70 transition active:bg-paper hover:bg-paper/50 flex items-center justify-center cursor-pointer shadow-xs select-none"
+            style={{ touchAction: 'manipulation' }}
+          >
+            わからなかった
+          </button>
+          <button
+            type="button"
+            data-action="judge"
+            tabIndex={isRevealed && isTop ? 0 : -1}
+            onClick={(e) => {
+              e.stopPropagation();
+              commitJudge(true);
+            }}
+            className="min-h-[56px] md:min-h-[60px] flex-1 rounded-2xl bg-ink font-medium text-paper transition active:opacity-90 hover:bg-ink/90 flex items-center justify-center cursor-pointer shadow-sm select-none"
+            style={{ touchAction: 'manipulation' }}
+          >
+            わかった
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+`
+);
+
+// 2. components/review/WordJudgeCardScreen.tsx
+writeFile(
+  'components/review/WordJudgeCardScreen.tsx',
+  `'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
@@ -39,10 +394,7 @@ export function WordJudgeCardScreen({
     new Map(initialAnswers || [])
   );
 
-  // 中断確認ダイアログ表示ステート
   const [showSuspendModal, setShowSuspendModal] = useState(false);
-
-  // 直前1問の修正ステート
   const [isRevising, setIsRevising] = useState(false);
   const [revisionIndex, setRevisionIndex] = useState<number | null>(null);
   const [isModifyLoading, setIsModifyLoading] = useState(false);
@@ -59,13 +411,11 @@ export function WordJudgeCardScreen({
 
   const total = cards.length;
 
-  // 通常進行時 vs 修正モード時
   const effectiveIndex = isRevising && revisionIndex !== null ? revisionIndex : currentIndex;
   const remaining = isRevising && revisionIndex !== null
     ? [cards[revisionIndex]]
     : cards.slice(currentIndex, currentIndex + MAX_STACK_VISIBLE);
 
-  // 通常判定
   const handleJudge = (wordId: string, isKnown: boolean) => {
     resultsRef.current.set(wordId, isKnown);
     const updatedMap = new Map(resultsRef.current);
@@ -86,7 +436,6 @@ export function WordJudgeCardScreen({
     setCurrentIndex(next);
   };
 
-  // 修正判定の確定
   const handleReviseCommit = async (wordId: string, isKnown: boolean) => {
     setIsModifyLoading(true);
     try {
@@ -102,7 +451,6 @@ export function WordJudgeCardScreen({
     }
   };
 
-  // 「前の回答を修正」ボタンの押下処理
   const handleStartRevision = () => {
     if (isRevising || currentIndex <= 0) return;
     const targetIdx = currentIndex - 1;
@@ -110,7 +458,6 @@ export function WordJudgeCardScreen({
     setIsRevising(true);
   };
 
-  // 全問終了時は結果画面を表示
   if (isCompleted || currentIndex >= total) {
     const correctCount = cards.filter((c) => answersMap.get(c.wordId) ?? false).length;
     const wrongCards = cards.filter((c) => !(answersMap.get(c.wordId) ?? false));
@@ -198,21 +545,20 @@ export function WordJudgeCardScreen({
 
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] flex-col justify-between overflow-hidden overscroll-none touch-none max-w-md md:max-w-xl lg:max-w-2xl mx-auto w-full select-none">
-      {/* 上部ヘッダー操作部: [中断ボタン] [修正中バッジ/前の回答を修正] [プログレス] */}
-      <div className="px-4 pb-2 pt-3 shrink-0 space-y-2 select-none" style={{ touchAction: 'manipulation' }}>
+      {/* 上部ヘッダー操作部 */}
+      <div className="px-4 pb-2 pt-3 shrink-0 space-y-2 select-none">
         <div className="flex items-center justify-between">
-          {/* 1. 中断ボタン */}
           <button
             type="button"
             onClick={() => setShowSuspendModal(true)}
             className="inline-flex min-h-[36px] items-center gap-1 rounded-full border border-line/80 bg-white/90 px-3 py-1 font-maru text-xs text-ink/60 transition active:scale-95 hover:text-ink cursor-pointer shadow-2xs"
+            style={{ touchAction: 'manipulation' }}
             aria-label="テストを中断する"
           >
             <LogOut className="h-3 w-3 text-ink/40" />
             <span>中断</span>
           </button>
 
-          {/* 2. 前の回答を修正ボタン / 修正中表示 */}
           {isRevising ? (
             <div className="flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 font-maru text-xs font-bold text-amber-900 shadow-2xs">
               <RotateCcw className="h-3 w-3 text-amber-600 animate-spin-once" />
@@ -228,6 +574,7 @@ export function WordJudgeCardScreen({
                   ? 'border-line bg-white text-ink/75 hover:bg-paper hover:text-ink'
                   : 'border-transparent text-ink/20 pointer-events-none'
               }`}
+              style={{ touchAction: 'manipulation' }}
               aria-label="直前の1問の回答を修正する"
             >
               <RotateCcw className="h-3 w-3 text-ink/40" />
@@ -235,13 +582,11 @@ export function WordJudgeCardScreen({
             </button>
           )}
 
-          {/* 3. 進捗カウンター */}
           <span className="font-mono text-xs text-ink/60 font-bold select-none pointer-events-none">
             {effectiveIndex + 1}/{total}
           </span>
         </div>
 
-        {/* プログレスバー */}
         <div className="h-1.5 md:h-2 w-full overflow-hidden rounded-full bg-line/50">
           <div
             className="h-full rounded-full bg-ink transition-[width] duration-300 motion-reduce:transition-none"
@@ -249,7 +594,6 @@ export function WordJudgeCardScreen({
           />
         </div>
 
-        {/* デスクトップ用キー操作ガイド (HUD) */}
         <div className="hidden sm:flex items-center justify-center">
           <div className="inline-flex items-center gap-2.5 text-[11px] font-mono text-ink/70 whitespace-nowrap bg-white/90 px-3 py-0.5 rounded-full border border-line shadow-2xs select-none">
             <div className="flex items-center gap-1">
@@ -274,7 +618,6 @@ export function WordJudgeCardScreen({
         </div>
       </div>
 
-      {/* カードスタック領域 */}
       <div className="relative flex-1 px-4 pb-6 pt-2 touch-none overflow-hidden overscroll-none">
         {remaining.map((card, i) => (
           <WordJudgeCard
@@ -293,7 +636,6 @@ export function WordJudgeCardScreen({
         ))}
       </div>
 
-      {/* 中断確認モーダル (誤タップ完全防止) */}
       {showSuspendModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-xs animate-in fade-in duration-150"
@@ -338,3 +680,7 @@ export function WordJudgeCardScreen({
     </div>
   );
 }
+`
+);
+
+console.log('\n✅ [修正完了] setup_fix_touch_scroll.js の実行が完了しました。');
