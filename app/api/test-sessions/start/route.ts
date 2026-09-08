@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { getTodayJST } from "@/lib/assignment/weekDates";
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { getTodayJST } from '@/lib/assignment/weekDates';
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,12 +11,12 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const body = await req.json();
     const {
-      type = "normal",
+      type = 'normal',
       dailyAssignmentId = null,
       totalCount = 0,
       wordIds = [],
@@ -25,21 +25,21 @@ export async function POST(req: NextRequest) {
     } = body;
     const today = getTodayJST();
 
-    if (type === "daily_check") {
+    if (type === 'daily_check') {
       const { data: completedSession } = await supabase
-        .from("test_sessions")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("date", today)
-        .eq("type", "daily_check")
-        .not("completed_at", "is", null)
+        .from('test_sessions')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .eq('type', 'daily_check')
+        .not('completed_at', 'is', null)
         .maybeSingle();
 
       if (completedSession) {
         return NextResponse.json(
           {
-            error: "Conflict",
-            detail: "本日の本番デイリーチェックは既に受験完了しています。",
+            error: 'Conflict',
+            detail: '本日の本番デイリーチェックは既に受験完了しています。',
           },
           { status: 409 }
         );
@@ -49,34 +49,34 @@ export async function POST(req: NextRequest) {
     if (forceNew) {
       const nowIso = new Date().toISOString();
       await supabase
-        .from("test_sessions")
+        .from('test_sessions')
         .update({ completed_at: nowIso })
-        .eq("user_id", user.id)
-        .eq("type", type)
-        .is("completed_at", null);
+        .eq('user_id', user.id)
+        .eq('type', type)
+        .is('completed_at', null);
     } else {
       let incompleteQuery = supabase
-        .from("test_sessions")
-        .select("id, type, date, total_count, correct_count, created_at, is_random_order")
-        .eq("user_id", user.id)
-        .eq("type", type)
-        .is("completed_at", null);
+        .from('test_sessions')
+        .select('id, type, date, total_count, correct_count, created_at, is_random_order')
+        .eq('user_id', user.id)
+        .eq('type', type)
+        .is('completed_at', null);
 
-      if (type === "daily_check") {
-        incompleteQuery = incompleteQuery.eq("date", today);
+      if (type === 'daily_check') {
+        incompleteQuery = incompleteQuery.eq('date', today);
       }
 
       const { data: incompleteSession } = await incompleteQuery
-        .order("created_at", { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (incompleteSession) {
         const { data: answers } = await supabase
-          .from("test_answers")
-          .select("word_id, is_known, origin_daily_assignment_id, created_at")
-          .eq("session_id", incompleteSession.id)
-          .order("created_at", { ascending: true });
+          .from('test_answers')
+          .select('word_id, is_known, origin_daily_assignment_id, created_at')
+          .eq('session_id', incompleteSession.id)
+          .order('created_at', { ascending: true });
 
         const answeredList = answers ?? [];
 
@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
         if (isValidResume) {
           return NextResponse.json({
             success: true,
-            mode: "resume",
+            mode: 'resume',
             session: incompleteSession,
             isRandomOrder: !!incompleteSession.is_random_order,
             answeredWords: answeredList.map((a) => ({
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { data: newSession, error: createError } = await supabase
-      .from("test_sessions")
+      .from('test_sessions')
       .insert({
         user_id: user.id,
         date: today,
@@ -117,33 +117,33 @@ export async function POST(req: NextRequest) {
         completed_at: null,
         is_random_order: isRandomOrder,
       })
-      .select("id, type, date, total_count, correct_count, created_at, is_random_order")
+      .select('id, type, date, total_count, correct_count, created_at, is_random_order')
       .single();
 
     if (createError || !newSession) {
-      if (createError?.code === "23505") {
+      if (createError?.code === '23505') {
         return NextResponse.json(
-          { error: "Conflict", detail: "本日のセッションは既に作成されています。" },
+          { error: 'Conflict', detail: '本日のセッションは既に作成されています。' },
           { status: 409 }
         );
       }
       return NextResponse.json(
-        { error: "Failed to start session", detail: createError?.message },
+        { error: 'Failed to start session', detail: createError?.message },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      mode: "new",
+      mode: 'new',
       session: newSession,
       isRandomOrder: !!newSession.is_random_order,
       answeredWords: [],
     });
   } catch (err: any) {
-    console.error("Start session error:", err);
+    console.error('Start session error:', err);
     return NextResponse.json(
-      { error: "Internal Server Error", detail: err?.message || String(err) },
+      { error: 'Internal Server Error', detail: err?.message || String(err) },
       { status: 500 }
     );
   }
