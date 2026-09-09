@@ -1,5 +1,5 @@
-import type { ChunkStat } from './computeChunkStats';
-import { getSaturdayOf, getWeekDates } from '@/lib/assignment/weekDates';
+import type { ChunkStat } from "./computeChunkStats";
+import { getSaturdayOf, getWeekDates } from "@/lib/assignment/weekDates";
 
 export interface GridDayCell {
   date: string;
@@ -22,7 +22,7 @@ export interface WeekColumnData {
   chunkIds: string[];
 }
 
-const DAY_LABELS_SAT = ['土', '日', '月', '火', '水', '木', '金'];
+const DAY_LABELS_SAT = ["土", "日", "月", "火", "水", "木", "金"];
 
 export function buildWeaknessGrid(
   chunks: ChunkStat[],
@@ -44,7 +44,7 @@ export function buildWeaknessGrid(
   let cursorSat = oldestSat;
   while (cursorSat <= currentWeekSat) {
     saturdayList.push(cursorSat);
-    const [y, m, d] = cursorSat.split(-).map(Number);
+    const [y, m, d] = cursorSat.split("-").map(Number);
     const dt = new Date(Date.UTC(y, m - 1, d + 7));
     cursorSat = dt.toISOString().slice(0, 10);
   }
@@ -61,7 +61,7 @@ export function buildWeaknessGrid(
     const endDate = dates[6];
     const isCurrentWeek = satDate === currentWeekSat;
 
-    const [y, m] = satDate.split(-).map(Number);
+    const [y, m] = satDate.split("-").map(Number);
     let monthLabel: string | null = null;
     if (previousMonth === null || m !== previousMonth) {
       monthLabel = `${m}月`;
