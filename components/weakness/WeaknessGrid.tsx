@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useRef, useEffect, useState } from 'react';
-import type { ChunkStat } from '@/lib/weakness/computeChunkStats';
-import { buildWeaknessGrid, type WeekColumnData } from '@/lib/weakness/buildWeaknessGrid';
-import { DrillFilterDialog } from './DrillFilterDialog';
-import { Navigation, Flame, CheckCircle2 } from 'lucide-react';
+import React, { useRef, useEffect, useState } from "react";
+import type { ChunkStat } from "@/lib/weakness/computeChunkStats";
+import { buildWeaknessGrid, type WeekColumnData } from "@/lib/weakness/buildWeaknessGrid";
+import { DrillFilterDialog } from "./DrillFilterDialog";
+import { Navigation, Flame, CheckCircle2 } from "lucide-react";
 
 interface WeaknessGridProps {
   chunks: ChunkStat[];
@@ -12,10 +12,10 @@ interface WeaknessGridProps {
   onSelectChunk: (chunk: ChunkStat) => void;
 }
 
-const DAY_LABELS = ['土', '日', '月', '火', '水', '木', '金'];
+const DAY_LABELS = ["土", "日", "月", "火", "水", "木", "金"];
 
 function formatDateShort(dateStr: string): string {
-  const [, m, d] = dateStr.split(-).map(Number);
+  const [, m, d] = dateStr.split("-").map(Number);
   return `${m}/${d}`;
 }
 
@@ -39,9 +39,9 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
   useEffect(() => {
     if (currentWeekColRef.current && scrollContainerRef.current) {
       currentWeekColRef.current.scrollIntoView({
-        behavior: 'smooth',
-        inline: 'center',
-        block: 'nearest',
+        behavior: "smooth",
+        inline: "center",
+        block: "nearest",
       });
     }
   }, []);
@@ -49,9 +49,9 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
   const scrollToCurrentWeek = () => {
     if (currentWeekColRef.current) {
       currentWeekColRef.current.scrollIntoView({
-        behavior: 'smooth',
-        inline: 'center',
-        block: 'nearest',
+        behavior: "smooth",
+        inline: "center",
+        block: "nearest",
       });
     }
   };
@@ -122,16 +122,16 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                     ref={isCurrent ? currentWeekColRef : null}
                     className={`flex flex-col w-[140px] shrink-0 rounded-2xl p-2 transition ${
                       isCurrent
-                        ? 'bg-amber-50/60 border-2 border-amber-300 ring-2 ring-amber-300/30'
-                        : 'bg-white/50 border border-line/60'
+                        ? "bg-amber-50/60 border-2 border-amber-300 ring-2 ring-amber-300/30"
+                        : "bg-white/50 border border-line/60"
                     }`}
                   >
                     <div
                       onClick={() => handleWeekHeaderClick(col)}
                       className={`h-[58px] rounded-xl p-2 flex flex-col justify-between transition cursor-pointer active:scale-98 ${
                         col.totalChunks > 0
-                          ? 'bg-white border border-line/80 hover:bg-paper hover:border-ink/40 shadow-2xs'
-                          : 'bg-transparent border border-dashed border-line/40 cursor-default'
+                          ? "bg-white border border-line/80 hover:bg-paper hover:border-ink/40 shadow-2xs"
+                          : "bg-transparent border border-dashed border-line/40 cursor-default"
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -148,7 +148,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                       {col.totalChunks > 0 ? (
                         <div className="flex items-baseline justify-between pt-0.5">
                           <span className="font-maru text-[10px] font-bold text-ink/50">
-                            平均 {col.avgAccuracyRate ?? '—'}%
+                            平均 {col.avgAccuracyRate ?? "—"}%
                           </span>
                           {col.totalMistakes > 0 ? (
                             <span className="inline-flex items-center gap-0.5 text-akashiito font-maru text-[10px] font-bold">
@@ -186,20 +186,20 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                         const accuracy = chunk.accuracyRate;
                         const isAttention = chunk.needsAttention;
 
-                        let tileStyle = 'border-line bg-white hover:bg-paper';
-                        let badgeStyle = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                        let tileStyle = "border-line bg-white hover:bg-paper";
+                        let badgeStyle = "bg-emerald-50 text-emerald-800 border-emerald-200";
                         let badgeText = `${accuracy}%`;
 
                         if (chunk.totalAttempts === 0) {
-                          tileStyle = 'border-line/60 bg-paper/60 text-ink/40';
-                          badgeStyle = 'bg-line/30 text-ink/40 border-line/40';
-                          badgeText = '未';
+                          tileStyle = "border-line/60 bg-paper/60 text-ink/40";
+                          badgeStyle = "bg-line/30 text-ink/40 border-line/40";
+                          badgeText = "未";
                         } else if (accuracy < 60) {
-                          tileStyle = 'border-akashiito-border bg-akashiito/10 shadow-2xs';
-                          badgeStyle = 'bg-akashiito text-white font-bold';
+                          tileStyle = "border-akashiito-border bg-akashiito/10 shadow-2xs";
+                          badgeStyle = "bg-akashiito text-white font-bold";
                         } else if (accuracy < 80) {
-                          tileStyle = 'border-amber-300 bg-amber-50/50';
-                          badgeStyle = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
+                          tileStyle = "border-amber-300 bg-amber-50/50";
+                          badgeStyle = "bg-amber-100 text-amber-900 border-amber-300 font-bold";
                         }
 
                         return (
@@ -225,7 +225,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                                 <span className="font-maru text-[9px] text-ink/40">
                                   {chunk.mistakeWords.length > 0
                                     ? `苦手 ${chunk.mistakeWords.length}語`
-                                    : 'ミスなし'}
+                                    : "ミスなし"}
                                 </span>
                                 {isAttention && (
                                   <span className="rounded-full bg-akashiito/15 text-akashiito text-[8px] font-bold px-1">
