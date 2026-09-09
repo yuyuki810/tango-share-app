@@ -6,7 +6,7 @@ export interface WeakWordCard {
   pronunciation?: string;
   meaning: string;
   studyCount: number;
-  accuracyRate: number; // 0..100 (%)
+  accuracyRate: number;
   number?: number;
   originDailyAssignmentId?: string;
   mistakeCount?: number;
@@ -15,14 +15,14 @@ export interface WeakWordCard {
 
 export interface GetWeakWordsOptions {
   chunkId?: string;
+  chunkIds?: string[];
+  rangeStart?: number;
+  rangeEnd?: number;
   filterMode?: 'all' | 'mistakes' | 'recent';
-  limit?: number; // 5, 10, 20 等
-  days?: number;  // 直近 3, 7 日 等
+  limit?: number;
+  days?: number;
 }
 
-/**
- * 苦手単語を条件に応じて高速抽出する (N+1ゼロ & 対象単語のみクエリして高速化)
- */
 export async function getWeakWords(
   supabase: SupabaseClient,
   userId: string,
@@ -34,9 +34,10 @@ export async function getWeakWords(
   const filterDays = options?.days;
   const targetChunkId = options?.chunkId;
 
-  // 1. チャンク指定がある場合は範囲を取得
   let chunkRange: { start: number; end: number } | null = null;
-  if (targetChunkId) {
+  if (options?.rangeStart && options?.rangeEnd) {
+    chunkRange = { start: options.rangeStart, end: options.rangeEnd };
+  } else if (targetChunkId) {
     const { data: chunk } = await supabase
       .from('daily_assignments')
       .select('range_start, range_end')
@@ -49,7 +50,6 @@ export async function getWeakWords(
     }
   }
 
-  // 2. ユーザーの全回答履歴を一括取得 (N+1ゼロ)
   const { data: sessions, error: sessionsError } = await supabase
     .from('test_sessions')
     .select('id, created_at, test_answers(id, is_known, word_id, created_at, origin_daily_assignment_id)')
@@ -99,7 +99,6 @@ export async function getWeakWords(
     });
   });
 
-  // 3. 苦手単語（ミス回数 >= 1 かつ 不正解または正答率60%以下）をフィルタ
   const now = new Date();
   const daysThreshold = filterDays
     ? new Date(now.getTime() - filterDays * 24 * 60 * 60 * 1000).toISOString()
@@ -111,7 +110,6 @@ export async function getWeakWords(
     const isWeak = !agg.lastAnswerKnown || accuracy <= 60 || agg.mistakeCount > 0;
     if (!isWeak || agg.mistakeCount === 0) return false;
 
-    // 直近期間フィルター
     if (filterMode === 'recent' && daysThreshold && agg.lastWrongAt) {
       if (agg.lastWrongAt < daysThreshold) return false;
     }
@@ -121,18 +119,14 @@ export async function getWeakWords(
 
   if (candidateAggs.length === 0) return [];
 
-  // 4. ソート処理
   if (filterMode === 'mistakes') {
-    // 間違えた回数が多い順 (同点は直近ミスが新しい順)
     candidateAggs.sort((a, b) => {
       if (b.mistakeCount !== a.mistakeCount) return b.mistakeCount - a.mistakeCount;
       return (b.lastWrongAt || '').localeCompare(a.lastWrongAt || '');
     });
   } else if (filterMode === 'recent') {
-    // 最後に間違えた日時が新しい順
     candidateAggs.sort((a, b) => (b.lastWrongAt || '').localeCompare(a.lastWrongAt || ''));
   } else {
-    // すべての苦手単語: 正答率が低い順 (苦手順)
     candidateAggs.sort((a, b) => {
       const accA = a.totalAttempts > 0 ? (a.correctCount / a.totalAttempts) * 100 : 0;
       const accB = b.totalAttempts > 0 ? (b.correctCount / b.totalAttempts) * 100 : 0;
@@ -141,7 +135,6 @@ export async function getWeakWords(
     });
   }
 
-  // 5. 必要な単語のみを words テーブルから抽出 (全件取得を完全回避)
   const targetWordIds = candidateAggs.map((c) => c.wordId);
 
   let wordQuery = supabase

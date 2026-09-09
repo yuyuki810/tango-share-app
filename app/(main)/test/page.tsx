@@ -1,14 +1,14 @@
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-import { redirect } from "next/navigation";
-import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
-import { getTodayJST } from "@/lib/assignment/weekDates";
-import { getTodayTestContext } from "@/lib/test/getTodayTestWords";
-import { getWeakWords } from "@/lib/weakness/getWeakWords";
-import { TestSessionRunner } from "@/components/test/TestSessionRunner";
-import { CheckCircle2 } from "lucide-react";
+import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { createClient } from '@/lib/supabase/server';
+import { getTodayJST } from '@/lib/assignment/weekDates';
+import { getTodayTestContext } from '@/lib/test/getTodayTestWords';
+import { getWeakWords } from '@/lib/weakness/getWeakWords';
+import { TestSessionRunner } from '@/components/test/TestSessionRunner';
+import { CheckCircle2 } from 'lucide-react';
 
 function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];
@@ -23,8 +23,10 @@ interface TestPageProps {
   searchParams: Promise<{
     mode?: string;
     originAssignmentId?: string;
+    rangeStart?: string;
+    rangeEnd?: string;
     weak?: string;
-    filter?: "all" | "mistakes" | "recent";
+    filter?: 'all' | 'mistakes' | 'recent';
     limit?: string;
     days?: string;
     random?: string;
@@ -34,37 +36,42 @@ interface TestPageProps {
 
 export default async function TestPage({ searchParams }: TestPageProps) {
   const params = await searchParams;
-  const sessionType = params.mode === "daily_check" ? "daily_check" : "normal";
+  const sessionType = params.mode === 'daily_check' ? 'daily_check' : 'normal';
 
-  const filterMode = params.filter || "all";
+  const filterMode = params.filter || 'all';
   const filterLimit = params.limit ? Number(params.limit) : undefined;
   const filterDays = params.days ? Number(params.days) : undefined;
-  const isRandomOrder = params.random === "true";
+  const isRandomOrder = params.random === 'true';
 
-  const isFromWeakness = !!params.originAssignmentId || params.weak === "true";
-  const backUrl = isFromWeakness ? "/weakness" : "/dashboard";
-  const backLabel = isFromWeakness ? "弱点マップへ戻る" : "ダッシュボードへ戻る";
+  const isFromWeakness = !!params.originAssignmentId || !!params.rangeStart || params.weak === 'true';
+  const backUrl = isFromWeakness ? '/weakness' : '/dashboard';
+  const backLabel = isFromWeakness ? '弱点マップへ戻る' : 'ダッシュボードへ戻る';
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  if (!user) redirect('/login');
 
   const { data: profile } = await supabase
-    .from("users")
-    .select("wordbook_id")
-    .eq("id", user.id)
+    .from('users')
+    .select('wordbook_id')
+    .eq('id', user.id)
     .single();
 
   if (!profile?.wordbook_id) {
-    redirect("/dashboard");
+    redirect('/dashboard');
   }
 
-  // 1. チャンク指定の苦手克服テスト
-  if (params.originAssignmentId) {
+  // 1. チャンク指定 または 週番号範囲指定の苦手克服テスト
+  if (params.originAssignmentId || (params.rangeStart && params.rangeEnd)) {
+    const rStart = params.rangeStart ? Number(params.rangeStart) : undefined;
+    const rEnd = params.rangeEnd ? Number(params.rangeEnd) : undefined;
+
     let weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {
       chunkId: params.originAssignmentId,
+      rangeStart: rStart,
+      rangeEnd: rEnd,
       filterMode,
       limit: filterLimit,
       days: filterDays,
@@ -92,9 +99,9 @@ export default async function TestPage({ searchParams }: TestPageProps) {
     return (
       <main className="mx-auto h-[100dvh] max-w-md md:max-w-xl lg:max-w-2xl bg-paper">
         <TestSessionRunner
-          key={`weak-chunk-${params.originAssignmentId}-${isRandomOrder}`}
+          key={`weak-range-${params.originAssignmentId || params.rangeStart}-${isRandomOrder}`}
           cards={weakCards}
-          dailyAssignmentId={params.originAssignmentId}
+          dailyAssignmentId={params.originAssignmentId || null}
           sessionType="normal"
           isReviewDay={false}
           backUrl={backUrl}
@@ -106,7 +113,7 @@ export default async function TestPage({ searchParams }: TestPageProps) {
   }
 
   // 2. 単語帳全体の苦手克服テスト
-  if (params.weak === "true") {
+  if (params.weak === 'true') {
     let weakCards = await getWeakWords(supabase, user.id, profile.wordbook_id, {
       filterMode,
       limit: filterLimit,
@@ -151,13 +158,13 @@ export default async function TestPage({ searchParams }: TestPageProps) {
   const today = getTodayJST();
 
   // 3. 本番デイリーチェック重複ガード
-  if (sessionType === "daily_check") {
+  if (sessionType === 'daily_check') {
     const { data: existingSession } = await supabase
-      .from("test_sessions")
-      .select("id, completed_at")
-      .eq("user_id", user.id)
-      .eq("date", today)
-      .eq("type", "daily_check")
+      .from('test_sessions')
+      .select('id, completed_at')
+      .eq('user_id', user.id)
+      .eq('date', today)
+      .eq('type', 'daily_check')
       .maybeSingle();
 
     if (existingSession && existingSession.completed_at) {

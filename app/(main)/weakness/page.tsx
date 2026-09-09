@@ -3,6 +3,7 @@ export const revalidate = 0;
 
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { getTodayJST } from '@/lib/assignment/weekDates';
 import { computeChunkStats } from '@/lib/weakness/computeChunkStats';
 import { WeaknessMapClient } from '@/components/weakness/WeaknessMapClient';
 
@@ -26,12 +27,13 @@ export default async function WeaknessPage() {
     redirect('/dashboard');
   }
 
+  const todayJst = getTodayJST();
   const wordbookName = (profile.wordbooks as { name?: string } | null)?.name ?? '';
   const chunks = await computeChunkStats(supabase, user.id, profile.wordbook_id);
 
   return (
     <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl w-full px-4 sm:px-0 pb-24 pt-6">
-      <WeaknessMapClient chunks={chunks} wordbookName={wordbookName} />
+      <WeaknessMapClient chunks={chunks} wordbookName={wordbookName} todayJst={todayJst} />
     </main>
   );
 }

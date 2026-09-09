@@ -4,16 +4,17 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import type { ChunkStat } from '@/lib/weakness/computeChunkStats';
-import { WeaknessChunkTile } from './WeaknessChunkTile';
+import { WeaknessGrid } from './WeaknessGrid';
 import { WeaknessBottomSheet } from './WeaknessBottomSheet';
 import { DrillFilterDialog } from './DrillFilterDialog';
 
 interface WeaknessMapClientProps {
   chunks: ChunkStat[];
   wordbookName: string;
+  todayJst: string;
 }
 
-export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientProps) {
+export function WeaknessMapClient({ chunks, wordbookName, todayJst }: WeaknessMapClientProps) {
   const [selectedChunk, setSelectedChunk] = useState<ChunkStat | null>(null);
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
@@ -22,7 +23,7 @@ export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientPro
   const totalMistakes = chunks.reduce((acc, c) => acc + c.mistakeWords.length, 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-6">
       <div>
         <Link
           href="/dashboard"
@@ -37,13 +38,12 @@ export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientPro
           <div>
             <h1 className="font-mincho text-2xl md:text-3xl font-bold text-ink">弱点マップ</h1>
             <p className="font-maru text-xs md:text-sm text-ink/50 mt-0.5">
-              {wordbookName || '単語帳'} の進度と定着傾向
+              {wordbookName || '単語帳'} の週ごとの進度と定着傾向
             </p>
           </div>
         </div>
       </div>
 
-      {/* 3つの統計サマリーカード */}
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-2xl border border-line bg-white p-3 text-center shadow-xs">
           <span className="block font-maru text-[10px] text-ink/50">総学習範囲</span>
@@ -64,34 +64,14 @@ export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientPro
         </div>
       </div>
 
-      {/* タイル一覧 */}
       <section className="space-y-2">
-        <div className="flex items-center justify-between px-1">
-          <h2 className="font-mincho text-xs md:text-sm font-bold text-ink/60">学習範囲タイル一覧</h2>
-          <span className="font-maru text-[10px] text-ink/40">タップして詳細・単語を確認</span>
-        </div>
-
-        {chunks.length === 0 ? (
-          <div className="rounded-3xl border border-line bg-white p-8 text-center shadow-xs">
-            <p className="font-mincho text-base font-bold text-ink/70">まだ学習記録がありません</p>
-            <p className="mt-1 font-maru text-xs text-ink/40">
-              デイリーテストを進めると、ここに弱点分析が表示されます
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-            {chunks.map((chunk) => (
-              <WeaknessChunkTile
-                key={chunk.chunkId}
-                chunk={chunk}
-                onClick={setSelectedChunk}
-              />
-            ))}
-          </div>
-        )}
+        <WeaknessGrid
+          chunks={chunks}
+          todayJst={todayJst}
+          onSelectChunk={setSelectedChunk}
+        />
       </section>
 
-      {/* 苦手克服テスト開始ボタン */}
       <div className="pt-2">
         <button
           type="button"
@@ -103,13 +83,11 @@ export function WeaknessMapClient({ chunks, wordbookName }: WeaknessMapClientPro
         </button>
       </div>
 
-      {/* 詳細ボトムシート */}
       <WeaknessBottomSheet
         chunk={selectedChunk}
         onClose={() => setSelectedChunk(null)}
       />
 
-      {/* 全体用絞り込みダイアログ */}
       <DrillFilterDialog
         isOpen={isFilterDialogOpen}
         onClose={() => setIsFilterDialogOpen(false)}
