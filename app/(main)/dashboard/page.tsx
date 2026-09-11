@@ -12,6 +12,7 @@ import {
 import { TodayRangeCard } from '@/components/dashboard/TodayRangeCard';
 import { WeeklySchedule } from '@/components/dashboard/WeeklySchedule';
 import { SetRangeCTA } from '@/components/dashboard/SetRangeCTA';
+import { NudgeBanner } from '@/components/group/NudgeBanner';
 import type { CycleType, DayType } from '@/lib/assignment/cycleTypes';
 import type { LastWeekData } from '@/components/weekly-range/CycleSettingsPanel';
 
@@ -28,7 +29,6 @@ export default async function DashboardPage() {
   const prevWeekStartDate = getPreviousSaturday(weekStartDate);
   const weekDates = getWeekDates(weekStartDate);
 
-  // [全クエリを並列実行]
   const [
     profileRes,
     weekSessionsRes,
@@ -37,6 +37,7 @@ export default async function DashboardPage() {
     prevWeeklyRangeRes,
     assignmentsRes,
     incompleteSessionRes,
+    receivedNudgesRes,
   ] = await Promise.all([
     supabase
       .from('users')
@@ -80,6 +81,11 @@ export default async function DashboardPage() {
       .eq('date', today)
       .is('completed_at', null)
       .maybeSingle(),
+    supabase
+      .from('daily_nudges')
+      .select('sender_id, users!daily_nudges_sender_id_fkey(name)')
+      .eq('target_id', user.id)
+      .eq('date', today),
   ]);
 
   const profile = profileRes.data;
@@ -89,6 +95,10 @@ export default async function DashboardPage() {
   const currentStreak = streakRes.data?.current_streak ?? 0;
   const weeklyRange = weeklyRangeRes.data;
   const prevWeeklyRange = prevWeeklyRangeRes.data;
+
+  const receivedSenderNames = (receivedNudgesRes.data ?? [])
+    .map((n: any) => n.users?.name)
+    .filter(Boolean);
 
   const lastWeekData: LastWeekData | undefined = prevWeeklyRange
     ? {
@@ -122,7 +132,12 @@ export default async function DashboardPage() {
   const wordbookTotalWords = wordbookData?.total_words ?? 0;
 
   return (
-    <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl w-full space-y-6 px-4 sm:px-0 pb-24 pt-6">
+    <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl w-full space-y-5 px-4 sm:px-0 pb-24 pt-6">
+      {/* 未受験時に仲間から応援が届いていればバナーを表示 */}
+      {!isDailyCheckCompleted && receivedSenderNames.length > 0 && (
+        <NudgeBanner senderNames={receivedSenderNames} />
+      )}
+
       <header className="flex items-center justify-between px-1">
         <div>
           <h1 className="font-mincho text-2xl md:text-3xl font-bold text-ink">単語帳</h1>
