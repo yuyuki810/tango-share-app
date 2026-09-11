@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Bell, Check, Share, PlusSquare, X } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { Bell, Check, Share, PlusSquare, X } from "lucide-react";
 
 function urlBase64ToUint8Array(base64String: string) {
-  const padding = =.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/\\-/g, +).replace(/_/g, /);
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -19,22 +19,22 @@ export function NotificationEnableCard() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
-  const [permission, setPermission] = useState<NotificationPermission>('default');
+  const [permission, setPermission] = useState<NotificationPermission>("default");
   const [isLoading, setIsLoading] = useState(false);
   const [showIOSModal, setShowIOSModal] = useState(false);
 
   useEffect(() => {
     const isIOSSafari = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
     const standalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia("(display-mode: standalone)").matches ||
       (navigator as any).standalone === true;
 
     setIsIOS(isIOSSafari);
     setIsStandalone(standalone);
 
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+    if (typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window) {
       setIsSupported(true);
-      if ('Notification' in window) {
+      if ("Notification" in window) {
         setPermission(Notification.permission);
       }
 
@@ -53,7 +53,7 @@ export function NotificationEnableCard() {
     }
 
     if (!isSupported) {
-      alert('お使いのブラウザはプッシュ通知に対応していません');
+      alert("お使いのブラウザはプッシュ通知に対応していません");
       return;
     }
 
@@ -62,7 +62,7 @@ export function NotificationEnableCard() {
       const perm = await Notification.requestPermission();
       setPermission(perm);
 
-      if (perm !== 'granted') {
+      if (perm !== "granted") {
         setIsLoading(false);
         return;
       }
@@ -71,7 +71,7 @@ export function NotificationEnableCard() {
       const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
       if (!vapidPublicKey) {
-        console.error('NEXT_PUBLIC_VAPID_PUBLIC_KEY is not defined');
+        console.error("NEXT_PUBLIC_VAPID_PUBLIC_KEY is not defined");
         setIsLoading(false);
         return;
       }
@@ -82,9 +82,9 @@ export function NotificationEnableCard() {
         applicationServerKey: convertedKey,
       });
 
-      const res = await fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(subscription),
       });
 
@@ -92,13 +92,13 @@ export function NotificationEnableCard() {
         setIsSubscribed(true);
       }
     } catch (err) {
-      console.error('Failed to subscribe to push notifications:', err);
+      console.error("Failed to subscribe to push notifications:", err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (isSubscribed && permission === 'granted') {
+  if (isSubscribed && permission === "granted") {
     return (
       <div className="flex items-center justify-between rounded-2xl border border-emerald-300 bg-emerald-50/60 p-3.5 shadow-2xs text-left">
         <div className="flex items-center gap-2 text-emerald-900">
@@ -127,8 +127,8 @@ export function NotificationEnableCard() {
             </span>
             <span className="font-maru text-[10px] text-ink/50">
               {isIOS && !isStandalone
-                ? 'ホーム画面に追加すると通知を有効化できます'
-                : '未受検時の応援メッセージを通知でお知らせ'}
+                ? "ホーム画面に追加すると通知を有効化できます"
+                : "未受検時の応援メッセージを通知でお知らせ"}
             </span>
           </div>
         </div>
@@ -139,7 +139,7 @@ export function NotificationEnableCard() {
           disabled={isLoading}
           className="inline-flex items-center gap-1 rounded-xl bg-ink px-3 py-1.5 font-maru text-xs font-bold text-paper shadow-2xs transition active:scale-95 hover:bg-ink/90 cursor-pointer disabled:opacity-50 shrink-0"
         >
-          <span>{isLoading ? '設定中…' : '有効にする'}</span>
+          <span>{isLoading ? "設定中…" : "有効にする"}</span>
         </button>
       </div>
 
