@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from "react";
-import { Bell, Check, Share, PlusSquare, X } from "lucide-react";
+import React, { useState, useEffect } from 'react';
+import { Bell, Check, Share, PlusSquare, X, AlertCircle } from 'lucide-react';
 
 function urlBase64ToUint8Array(base64String: string) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -15,65 +15,92 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 export function NotificationEnableCard() {
-  const [isSupported, setIsSupported] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
-  const [permission, setPermission] = useState<NotificationPermission>("default");
+  const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showIOSModal, setShowIOSModal] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const isIOSSafari = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
     const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
+      window.matchMedia('(display-mode: standalone)').matches ||
       (navigator as any).standalone === true;
 
     setIsIOS(isIOSSafari);
     setIsStandalone(standalone);
 
-    if (typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window) {
-      setIsSupported(true);
-      if ("Notification" in window) {
-        setPermission(Notification.permission);
-      }
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setPermission(Notification.permission);
+    }
 
-      navigator.serviceWorker.ready.then((reg) => {
-        reg.pushManager.getSubscription().then((sub) => {
-          setIsSubscribed(!!sub);
-        });
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        if (reg?.pushManager) {
+          reg.pushManager.getSubscription().then((sub) => {
+            setIsSubscribed(!!sub);
+          });
+        }
       });
     }
   }, []);
 
+  // 要件: 対応はiPhoneのみ。PCでは非表示
+  if (!mounted || !isIOS) {
+    return null;
+  }
+
   const handleEnableNotification = async () => {
-    if (isIOS && !isStandalone) {
+    setErrorMessage(null);
+
+    // ホーム画面に追加されていない場合: モーダルを展開
+    if (!isStandalone) {
       setShowIOSModal(true);
       return;
     }
 
-    if (!isSupported) {
-      alert("お使いのブラウザはプッシュ通知に対応していません");
+    if (!('serviceWorker' in navigator) || !('Notification' in window)) {
+      setErrorMessage('お使いの環境はプッシュ通知に対応していません（iOS 16.4以上が必要です）');
       return;
     }
 
     setIsLoading(true);
+
     try {
       const perm = await Notification.requestPermission();
       setPermission(perm);
 
-      if (perm !== "granted") {
+      if (perm !== 'granted') {
         setIsLoading(false);
+        setErrorMessage('通知の許可がキャンセルされました。iPhoneの設定アプリから許可してください。');
         return;
       }
 
-      const reg = await navigator.serviceWorker.ready;
-      const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      let reg: ServiceWorkerRegistration;
+      try {
+        reg = await navigator.serviceWorker.register('/sw.js');
+      } catch (swErr: any) {
+        reg = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Service Workerの起動がタイムアウトしました')), 5000)
+          ),
+        ]);
+      }
+
+      let vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidPublicKey) {
+        const keyRes = await fetch('/api/push/vapid-public-key');
+        const keyData = await keyRes.json();
+        vapidPublicKey = keyData.publicKey;
+      }
 
       if (!vapidPublicKey) {
-        console.error("NEXT_PUBLIC_VAPID_PUBLIC_KEY is not defined");
-        setIsLoading(false);
-        return;
+        throw new Error('通知サーバーの公開鍵が取得できませんでした。');
       }
 
       const convertedKey = urlBase64ToUint8Array(vapidPublicKey);
@@ -82,23 +109,27 @@ export function NotificationEnableCard() {
         applicationServerKey: convertedKey,
       });
 
-      const res = await fetch("/api/push/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(subscription),
       });
 
-      if (res.ok) {
-        setIsSubscribed(true);
+      const resData = await res.json();
+      if (!res.ok) {
+        throw new Error(resData.error || 'サーバーへの購読登録に失敗しました');
       }
-    } catch (err) {
-      console.error("Failed to subscribe to push notifications:", err);
+
+      setIsSubscribed(true);
+    } catch (err: any) {
+      console.error('Push enable error:', err);
+      setErrorMessage(err?.message || '通知の設定中にエラーが発生しました');
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (isSubscribed && permission === "granted") {
+  if (isSubscribed && permission === 'granted') {
     return (
       <div className="flex items-center justify-between rounded-2xl border border-emerald-300 bg-emerald-50/60 p-3.5 shadow-2xs text-left">
         <div className="flex items-center gap-2 text-emerald-900">
@@ -107,7 +138,7 @@ export function NotificationEnableCard() {
           </div>
           <div>
             <span className="font-mincho text-xs font-bold block">通知は有効です</span>
-            <span className="font-maru text-[10px] text-emerald-800/70">仲間からの応援がリアルタイムで届きます</span>
+            <span className="font-maru text-[10px] text-emerald-800/70">仲間からの応援通知を受信できます</span>
           </div>
         </div>
       </div>
@@ -116,31 +147,40 @@ export function NotificationEnableCard() {
 
   return (
     <>
-      <div className="flex items-center justify-between rounded-2xl border border-line bg-white p-3.5 shadow-2xs text-left">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-700 border border-amber-200">
-            <Bell className="h-4 w-4" />
+      <div className="space-y-2">
+        <div className="flex items-center justify-between rounded-2xl border border-line bg-white p-3.5 shadow-2xs text-left">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-700 border border-amber-200">
+              <Bell className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="font-mincho text-xs font-bold text-ink block">
+                仲間からの応援通知を受け取る
+              </span>
+              <span className="font-maru text-[10px] text-ink/50">
+                {!isStandalone
+                  ? 'ホーム画面に追加すると通知を有効化できます'
+                  : '未受検時の応援メッセージを通知でお知らせ'}
+              </span>
+            </div>
           </div>
-          <div>
-            <span className="font-mincho text-xs font-bold text-ink block">
-              仲間からの応援通知を受け取る
-            </span>
-            <span className="font-maru text-[10px] text-ink/50">
-              {isIOS && !isStandalone
-                ? "ホーム画面に追加すると通知を有効化できます"
-                : "未受検時の応援メッセージを通知でお知らせ"}
-            </span>
-          </div>
+
+          <button
+            type="button"
+            onClick={handleEnableNotification}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1 rounded-xl bg-ink px-3 py-1.5 font-maru text-xs font-bold text-paper shadow-2xs transition active:scale-95 hover:bg-ink/90 cursor-pointer disabled:opacity-50 shrink-0"
+          >
+            <span>{isLoading ? '設定中…' : '有効にする'}</span>
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={handleEnableNotification}
-          disabled={isLoading}
-          className="inline-flex items-center gap-1 rounded-xl bg-ink px-3 py-1.5 font-maru text-xs font-bold text-paper shadow-2xs transition active:scale-95 hover:bg-ink/90 cursor-pointer disabled:opacity-50 shrink-0"
-        >
-          <span>{isLoading ? "設定中…" : "有効にする"}</span>
-        </button>
+        {errorMessage && (
+          <div className="flex items-center gap-1.5 rounded-xl border border-akashiito-border bg-akashiito/10 p-2.5 text-akashiito font-maru text-[11px]">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
       </div>
 
       {showIOSModal && (

@@ -104,15 +104,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Web Push通知をバックグラウンド送信 (失敗しても催促DB保存は成功させる)
+    let pushResult = { sent: 0, failed: 0 };
     try {
-      await sendPushNotificationToUser(supabase, targetId, {
+      pushResult = await sendPushNotificationToUser(supabase, targetId, {
         title: '単語道場 | 仲間からの応援',
         body: `${sender.name}さんから応援が届きました！「今日もいっしょに頑張ろう！」`,
         url: '/dashboard',
         icon: '/icons/icon-192x192.png',
         badge: '/icons/icon-192x192.png',
       });
+      console.log(`Push notification sent to ${targetId}:`, pushResult);
     } catch (pushErr) {
       console.error('Background push notification error:', pushErr);
     }
@@ -120,6 +121,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       nudge: insertedNudge,
+      push: pushResult,
       message: '応援メッセージを送信しました！',
     });
   } catch (err: any) {
