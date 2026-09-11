@@ -128,7 +128,7 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
       .eq('date', today),
     supabase
       .from('daily_nudges')
-      .select('sender_id, users!daily_nudges_sender_id_fkey(name)')
+      .select('sender_id')
       .eq('target_id', user.id)
       .eq('date', today),
   ]);
@@ -182,9 +182,15 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
 
   // 催促(応援)関連データ
   const sentNudgeTargetIds = new Set((sentNudgesRes.data ?? []).map((n) => n.target_id));
-  const receivedSenderNames = (receivedNudgesRes.data ?? [])
-    .map((n: any) => n.users?.name)
-    .filter(Boolean);
+  const receivedSenderIds = (receivedNudgesRes.data ?? []).map((n: any) => n.sender_id);
+  let receivedSenderNames: string[] = [];
+  if (receivedSenderIds.length > 0) {
+    const { data: senderUsers } = await supabase
+      .from('users')
+      .select('name')
+      .in('id', receivedSenderIds);
+    receivedSenderNames = (senderUsers ?? []).map((u) => u.name).filter(Boolean);
+  }
 
   return (
     <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl w-full space-y-5 px-4 sm:px-0 pb-28 pt-6">

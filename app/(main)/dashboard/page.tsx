@@ -84,7 +84,7 @@ export default async function DashboardPage() {
       .maybeSingle(),
     supabase
       .from('daily_nudges')
-      .select('sender_id, users!daily_nudges_sender_id_fkey(name)')
+      .select('sender_id')
       .eq('target_id', user.id)
       .eq('date', today),
   ]);
@@ -97,9 +97,15 @@ export default async function DashboardPage() {
   const weeklyRange = weeklyRangeRes.data;
   const prevWeeklyRange = prevWeeklyRangeRes.data;
 
-  const receivedSenderNames = (receivedNudgesRes.data ?? [])
-    .map((n: any) => n.users?.name)
-    .filter(Boolean);
+  const receivedSenderIds = (receivedNudgesRes.data ?? []).map((n: any) => n.sender_id);
+  let receivedSenderNames: string[] = [];
+  if (receivedSenderIds.length > 0) {
+    const { data: senderUsers } = await supabase
+      .from('users')
+      .select('name')
+      .in('id', receivedSenderIds);
+    receivedSenderNames = (senderUsers ?? []).map((u) => u.name).filter(Boolean);
+  }
 
   const lastWeekData: LastWeekData | undefined = prevWeeklyRange
     ? {

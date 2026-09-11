@@ -1,5 +1,6 @@
 import webpush from 'web-push';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
@@ -31,12 +32,25 @@ export async function sendPushNotificationToUser(
     return { sent: 0, failed: 0 };
   }
 
-  const { data: subs, error } = await supabase
+  // RLSをバイパスして相手の端末トークンを確実に取得するため、Service RoleがあればAdmin Clientを使用
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const queryClient = (supabaseUrl && serviceRoleKey)
+    ? createSupabaseClient(supabaseUrl, serviceRoleKey)
+    : supabase;
+
+  const { data: subs, error } = await queryClient
     .from('push_subscriptions')
     .select('id, endpoint, p256dh, auth')
     .eq('user_id', userId);
 
-  if (error || !subs || subs.length === 0) {
+  if (error) {
+    console.error('Failed to fetch push subscriptions:', error);
+    return { sent: 0, failed: 0 };
+  }
+
+  if (!subs || subs.length === 0) {
+    console.log(`No push subscriptions found for user ${userId}`);
     return { sent: 0, failed: 0 };
   }
 
@@ -59,19 +73,19 @@ export async function sendPushNotificationToUser(
           jsonPayload
         );
         sent++;
+        console.log(`Successfully sent push notification to ${userId}`);
       } catch (err: any) {
         failed++;
+        console.error('WebPush send error:', err?.statusCode, err?.message);
         if (err?.statusCode === 410 || err?.statusCode === 404) {
           expiredIds.push(sub.id);
-        } else {
-          console.error('Push notification send error:', err);
         }
       }
     })
   );
 
   if (expiredIds.length > 0) {
-    await supabase.from('push_subscriptions').delete().in('id', expiredIds);
+    await queryClient.from('push_subscriptions').delete().in('id', expiredIds);
   }
 
   return { sent, failed };
