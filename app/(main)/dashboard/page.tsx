@@ -13,6 +13,7 @@ import { TodayRangeCard } from '@/components/dashboard/TodayRangeCard';
 import { WeeklySchedule } from '@/components/dashboard/WeeklySchedule';
 import { SetRangeCTA } from '@/components/dashboard/SetRangeCTA';
 import { NudgeBanner } from '@/components/group/NudgeBanner';
+import { NotificationEnableCard } from '@/components/pwa/NotificationEnableCard';
 import type { CycleType, DayType } from '@/lib/assignment/cycleTypes';
 import type { LastWeekData } from '@/components/weekly-range/CycleSettingsPanel';
 
@@ -157,6 +158,9 @@ export default async function DashboardPage() {
           </div>
         </div>
       </header>
+
+      {/* 通知有効化カード */}
+      <NotificationEnableCard />
 
       <SetRangeCTA
         wordbookId={profile?.wordbook_id ?? ''}

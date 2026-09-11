@@ -1,26 +1,22 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Share, X, PlusSquare } from 'lucide-react';
+import { Share, X, PlusSquare, Bell } from 'lucide-react';
 
 export function IOSInstallPrompt() {
   const [showPrompt, setShowPrompt] = useState(false);
 
   useEffect(() => {
-    // 1. iOS環境判定
     const isIOS =
       /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
 
-    // 2. スタンドアロン表示（インストール済み）判定
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       (navigator as any).standalone === true;
 
-    // 3. 過去に閉じたかどうかの確認
     const isDismissed = localStorage.getItem('pwa_ios_prompt_dismissed') === '1';
 
     if (isIOS && !isStandalone && !isDismissed) {
-      // 画面ロード直後のチラつきを防ぐため少し遅延して表示
       const timer = setTimeout(() => {
         setShowPrompt(true);
       }, 1500);
@@ -43,15 +39,15 @@ export function IOSInstallPrompt() {
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-akashiito text-white shadow-2xs">
-            <PlusSquare className="h-5 w-5" />
+            <Bell className="h-5 w-5" />
           </div>
           <div>
             <h2 className="font-mincho text-sm font-bold text-ink">
-              ホーム画面に追加してアプリとして使う
+              仲間からの通知を受け取る準備
             </h2>
             <p className="mt-0.5 font-maru text-[11px] text-ink/60 leading-tight">
-              Safari下部の共有ボタン <Share className="inline h-3 w-3 mx-0.5 text-ink/70 -mt-0.5" /> をタップし、
-              <strong>「ホーム画面に追加」</strong>を選択してください。
+              応援通知を受け取るには、Safari下部の共有ボタン <Share className="inline h-3 w-3 mx-0.5 text-ink/70 -mt-0.5" /> から
+              <strong>「ホーム画面に追加」</strong>してください。
             </p>
           </div>
         </div>

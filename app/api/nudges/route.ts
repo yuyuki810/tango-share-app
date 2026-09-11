@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getTodayJST } from '@/lib/assignment/weekDates';
+import { sendPushNotificationToUser } from '@/lib/push/sendPushNotification';
 
 export async function POST(req: NextRequest) {
   try {
@@ -101,6 +102,19 @@ export async function POST(req: NextRequest) {
         { error: '応援メッセージの送信に失敗しました', detail: insertError.message },
         { status: 500 }
       );
+    }
+
+    // Web Push通知をバックグラウンド送信 (失敗しても催促DB保存は成功させる)
+    try {
+      await sendPushNotificationToUser(supabase, targetId, {
+        title: '単語道場 | 仲間からの応援',
+        body: `${sender.name}さんから応援が届きました！「今日もいっしょに頑張ろう！」`,
+        url: '/dashboard',
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/icon-192x192.png',
+      });
+    } catch (pushErr) {
+      console.error('Background push notification error:', pushErr);
     }
 
     return NextResponse.json({
