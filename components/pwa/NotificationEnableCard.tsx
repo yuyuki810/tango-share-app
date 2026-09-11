@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Bell, Check, Share, PlusSquare, X, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { Bell, Check, Share, PlusSquare, X, AlertCircle } from "lucide-react";
 
 function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
@@ -18,7 +18,7 @@ export function NotificationEnableCard() {
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
-  const [permission, setPermission] = useState<NotificationPermission>('default');
+  const [permission, setPermission] = useState<NotificationPermission>("default");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showIOSModal, setShowIOSModal] = useState(false);
@@ -28,18 +28,18 @@ export function NotificationEnableCard() {
     setMounted(true);
     const isIOSSafari = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
     const standalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia("(display-mode: standalone)").matches ||
       (navigator as any).standalone === true;
 
     setIsIOS(isIOSSafari);
     setIsStandalone(standalone);
 
-    if (typeof window !== 'undefined' && 'Notification' in window) {
+    if (typeof window !== "undefined" && "Notification" in window) {
       setPermission(Notification.permission);
     }
 
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistration().then((reg) => {
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistration("/").then((reg) => {
         if (reg?.pushManager) {
           reg.pushManager.getSubscription().then((sub) => {
             setIsSubscribed(!!sub);
@@ -49,7 +49,6 @@ export function NotificationEnableCard() {
     }
   }, []);
 
-  // 要件: 対応はiPhoneのみ。PCでは非表示
   if (!mounted || !isIOS) {
     return null;
   }
@@ -57,14 +56,13 @@ export function NotificationEnableCard() {
   const handleEnableNotification = async () => {
     setErrorMessage(null);
 
-    // ホーム画面に追加されていない場合: モーダルを展開
     if (!isStandalone) {
       setShowIOSModal(true);
       return;
     }
 
-    if (!('serviceWorker' in navigator) || !('Notification' in window)) {
-      setErrorMessage('お使いの環境はプッシュ通知に対応していません（iOS 16.4以上が必要です）');
+    if (!("serviceWorker" in navigator) || !("Notification" in window)) {
+      setErrorMessage("お使いの環境はプッシュ通知に対応していません（iOS 16.4以上が必要です）");
       return;
     }
 
@@ -74,62 +72,57 @@ export function NotificationEnableCard() {
       const perm = await Notification.requestPermission();
       setPermission(perm);
 
-      if (perm !== 'granted') {
+      if (perm !== "granted") {
         setIsLoading(false);
-        setErrorMessage('通知の許可がキャンセルされました。iPhoneの設定アプリから許可してください。');
+        setErrorMessage("通知の許可がキャンセルされました。iPhoneの設定アプリから通知を許可してください。");
         return;
       }
 
-      let reg: ServiceWorkerRegistration;
-      try {
-        reg = await navigator.serviceWorker.register('/sw.js');
-      } catch (swErr: any) {
-        reg = await Promise.race([
-          navigator.serviceWorker.ready,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Service Workerの起動がタイムアウトしました')), 5000)
-          ),
-        ]);
-      }
+      // 1. Service Worker を登録して即座に ready を待機
+      await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      const reg = await navigator.serviceWorker.ready;
 
+      // 2. VAPID公開鍵の取得
       let vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
       if (!vapidPublicKey) {
-        const keyRes = await fetch('/api/push/vapid-public-key');
+        const keyRes = await fetch("/api/push/vapid-public-key");
         const keyData = await keyRes.json();
         vapidPublicKey = keyData.publicKey;
       }
 
       if (!vapidPublicKey) {
-        throw new Error('通知サーバーの公開鍵が取得できませんでした。');
+        throw new Error("通知サーバーの公開鍵が取得できませんでした。Vercelの環境変数を確認してください。");
       }
 
+      // 3. PushManager による購読
       const convertedKey = urlBase64ToUint8Array(vapidPublicKey);
       const subscription = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: convertedKey,
       });
 
-      const res = await fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      // 4. バックエンドへの保存
+      const res = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(subscription),
       });
 
       const resData = await res.json();
       if (!res.ok) {
-        throw new Error(resData.error || 'サーバーへの購読登録に失敗しました');
+        throw new Error(resData.error || "サーバーへの購読登録に失敗しました");
       }
 
       setIsSubscribed(true);
     } catch (err: any) {
-      console.error('Push enable error:', err);
-      setErrorMessage(err?.message || '通知の設定中にエラーが発生しました');
+      console.error("Push enable error:", err);
+      setErrorMessage(err?.message || "通知の設定中にエラーが発生しました");
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (isSubscribed && permission === 'granted') {
+  if (isSubscribed && permission === "granted") {
     return (
       <div className="flex items-center justify-between rounded-2xl border border-emerald-300 bg-emerald-50/60 p-3.5 shadow-2xs text-left">
         <div className="flex items-center gap-2 text-emerald-900">
@@ -159,8 +152,8 @@ export function NotificationEnableCard() {
               </span>
               <span className="font-maru text-[10px] text-ink/50">
                 {!isStandalone
-                  ? 'ホーム画面に追加すると通知を有効化できます'
-                  : '未受検時の応援メッセージを通知でお知らせ'}
+                  ? "ホーム画面に追加すると通知を有効化できます"
+                  : "未受検時の応援メッセージを通知でお知らせ"}
               </span>
             </div>
           </div>
@@ -171,7 +164,7 @@ export function NotificationEnableCard() {
             disabled={isLoading}
             className="inline-flex items-center gap-1 rounded-xl bg-ink px-3 py-1.5 font-maru text-xs font-bold text-paper shadow-2xs transition active:scale-95 hover:bg-ink/90 cursor-pointer disabled:opacity-50 shrink-0"
           >
-            <span>{isLoading ? '設定中…' : '有効にする'}</span>
+            <span>{isLoading ? "設定中…" : "有効にする"}</span>
           </button>
         </div>
 
