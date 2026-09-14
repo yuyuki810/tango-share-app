@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { WordJudgeCard, type WordCardData } from "./WordJudgeCard";
 import { RotateCcw, AlertCircle, LogOut } from "lucide-react";
 
-export interface WordJudgeCardScreenProps {
+interface WordJudgeCardScreenProps {
   cards: WordCardData[];
   initialIndex?: number;
   initialAnswers?: Map<string, boolean>;
@@ -165,6 +165,8 @@ export function WordJudgeCardScreen({
             </div>
             <span className="text-line">|</span>
             <div className="flex items-center gap-1">
+              <kbd className="px-1.5 py-0.2 rounded border border-line bg-paper text-[10px] font-bold text-ink">D</kbd>
+              <span className="text-ink/30 text-[9px]">·</span>
               <kbd className="px-1.5 py-0.2 rounded border border-line bg-paper text-[10px] font-bold text-ink">→</kbd>
               <span className="font-bold text-emerald-600 text-[11px] ml-0.5">◯</span>
             </div>
@@ -179,6 +181,7 @@ export function WordJudgeCardScreen({
             card={card}
             isTop={i === 0}
             stackOffset={i}
+            defaultRevealed={isRevising}
             onJudge={(isKnown) => {
               if (isRevising) {
                 handleReviseCommit(card.wordId, isKnown);

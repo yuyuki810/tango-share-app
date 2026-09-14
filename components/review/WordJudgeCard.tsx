@@ -18,6 +18,7 @@ interface WordJudgeCardProps {
   isTop: boolean;
   stackOffset: number;
   onJudge: (isKnown: boolean) => void;
+  defaultRevealed?: boolean;
 }
 
 const SWIPE_THRESHOLD_RATIO = 0.25;
@@ -30,8 +31,8 @@ function getHeadwordFontSize(word: string): string {
   return "text-2xl sm:text-3xl lg:text-4xl";
 }
 
-export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCardProps) {
-  const [isRevealed, setIsRevealed] = useState(false);
+export function WordJudgeCard({ card, isTop, stackOffset, onJudge, defaultRevealed = false }: WordJudgeCardProps) {
+  const [isRevealed, setIsRevealed] = useState(defaultRevealed);
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [exitDirection, setExitDirection] = useState<"left" | "right" | null>(null);
@@ -40,6 +41,10 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
   const dragStartY = useRef<number | null>(null);
   const isPointerDown = useRef<boolean>(false);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsRevealed(defaultRevealed);
+  }, [card.wordId, defaultRevealed]);
 
   const handleReveal = useCallback(() => {
     if (!isRevealed) {
@@ -89,7 +94,7 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
         return;
       }
 
-      // ★ 意味を確認(めくる)していない状態では、誤操作防止のため判定キーを一切受け付けない
+      // ★ 意味を確認(めくる)していない状態では判定キーを受け付けない
       if (!isRevealed) {
         return;
       }
@@ -107,10 +112,13 @@ export function WordJudgeCard({ card, isTop, stackOffset, onJudge }: WordJudgeCa
         return;
       }
 
-      // 3. わかった (ArrowRight のみ。Dキーは完全削除)
+      // 3. わかった (ArrowRight, KeyD, d, D - Sキーは完全排除)
       if (
         code === "ArrowRight" ||
-        key === "ArrowRight"
+        code === "KeyD" ||
+        key === "ArrowRight" ||
+        key === "d" ||
+        key === "D"
       ) {
         e.preventDefault();
         commitJudge(true);
