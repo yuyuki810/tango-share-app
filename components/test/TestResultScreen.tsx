@@ -1,16 +1,17 @@
 'use client';
 
-import React, { useState } from 'react';
-import Link from 'next/link';
-import type { WordCardData } from '@/components/review/WordJudgeCard';
-import type { LearningPatternBadgeResult } from '@/lib/scoring/diagnoseLearningPattern';
-import { Info, X, Sparkles } from 'lucide-react';
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import type { WordCardData } from "@/components/review/WordJudgeCard";
+import type { LearningPatternBadgeResult } from "@/lib/scoring/diagnoseLearningPattern";
+import { revalidateAfterTest } from "@/lib/actions/revalidateAfterTest";
+import { Info, X, Sparkles } from "lucide-react";
 
 interface TestResultScreenProps {
   correctCount: number;
   totalCount: number;
   wrongCards: WordCardData[];
-  sessionType: 'daily_check' | 'normal';
+  sessionType: "daily_check" | "normal";
   saveStatus?: {
     isSaving: boolean;
     isSuccess: boolean;
@@ -35,28 +36,38 @@ export function TestResultScreen({
   wrongCards,
   sessionType,
   saveStatus,
-  backUrl = '/dashboard',
-  backLabel = 'ダッシュボードへ戻る',
+  backUrl = "/dashboard",
+  backLabel = "ダッシュボードへ戻る",
   dailyScore,
   learningPatternBadge,
 }: TestResultScreenProps) {
+  const router = useRouter();
   const [showScoreInfo, setShowScoreInfo] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+
   const accuracy = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
   const isPerfect = wrongCards.length === 0;
-  const isDailyCheck = sessionType === 'daily_check';
+  const isDailyCheck = sessionType === "daily_check";
+
+  const handleLeave = (targetUrl: string) => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    revalidateAfterTest().catch((e) => console.error("Cache revalidation error on leave:", e));
+    router.push(targetUrl);
+  };
 
   return (
     <div className="flex min-h-[100dvh] flex-col justify-between p-6 bg-paper animate-in fade-in duration-200 select-none">
       <div className="space-y-6">
         <div className="text-center pt-4">
           <span className="inline-block rounded-full bg-highlighter/40 px-3 py-1 font-maru text-xs font-bold text-ink mb-2">
-            {isDailyCheck ? '本日の本番チェック完了 🎉' : '練習テスト完了 🎉'}
+            {isDailyCheck ? "本日の本番チェック完了 🎉" : "練習テスト完了 🎉"}
           </span>
           <h1 className="font-mincho text-2xl font-bold text-ink">
-            {isDailyCheck ? '本番チェック結果' : 'テスト結果'}
+            {isDailyCheck ? "本番チェック結果" : "テスト結果"}
           </h1>
           <p className="mt-1 font-maru text-xs text-ink/60">
-            {isPerfect ? '全問正解！素晴らしい集中力です' : '間違えた単語を振り返って定着させましょう'}
+            {isPerfect ? "全問正解！素晴らしい集中力です" : "間違えた単語を振り返って定着させましょう"}
           </p>
 
           <div className="mt-5 rounded-3xl border border-line bg-white p-5 shadow-sm text-center space-y-4">
@@ -131,7 +142,7 @@ export function TestResultScreen({
             <div className="flex items-center justify-between text-ink font-maru">
               <span className="flex items-center gap-1.5 font-bold">
                 <span>🟢</span>
-                <span>{isDailyCheck ? '本番チェック記録完了' : '練習結果を記録完了'}</span>
+                <span>{isDailyCheck ? "本番チェック記録完了" : "練習結果を記録完了"}</span>
               </span>
               <span className="text-[11px] text-ink/50">
                 {saveStatus.savedCount ?? totalCount}件の回答を保存
@@ -141,10 +152,10 @@ export function TestResultScreen({
             <div className="space-y-1.5 text-akashiito font-maru">
               <div className="flex items-center gap-1.5 font-bold">
                 <span>🔴</span>
-                <span>{saveStatus?.errorMessage || '保存エラーが発生しました'}</span>
+                <span>{saveStatus?.errorMessage || "保存エラーが発生しました"}</span>
               </div>
               <p className="text-[11px] bg-akashiito/10 p-2 rounded-lg border border-akashiito/30 font-mono break-all">
-                {saveStatus?.detail || 'データベースに保存できませんでした'}
+                {saveStatus?.detail || "データベースに保存できませんでした"}
               </p>
             </div>
           )}
@@ -189,19 +200,23 @@ export function TestResultScreen({
       </div>
 
       <div className="pt-6 pb-2 space-y-2">
-        <Link
-          href={backUrl}
-          className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90"
+        <button
+          type="button"
+          onClick={() => handleLeave(backUrl)}
+          disabled={isLeaving}
+          className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90 cursor-pointer disabled:opacity-70"
         >
-          {backLabel}
-        </Link>
+          {isLeaving ? "移動中…" : backLabel}
+        </button>
         {isDailyCheck && (
-          <Link
-            href="/group"
-            className="flex min-h-[44px] w-full items-center justify-center rounded-2xl border border-line bg-white font-maru text-xs font-bold text-ink transition hover:bg-paper-hover active:scale-[0.98]"
+          <button
+            type="button"
+            onClick={() => handleLeave("/group")}
+            disabled={isLeaving}
+            className="flex min-h-[44px] w-full items-center justify-center rounded-2xl border border-line bg-white font-maru text-xs font-bold text-ink transition hover:bg-paper-hover active:scale-[0.98] cursor-pointer disabled:opacity-70"
           >
             グループの受験状況を確認する
-          </Link>
+          </button>
         )}
       </div>
 

@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
-import Link from 'next/link';
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { revalidateAfterTest } from "@/lib/actions/revalidateAfterTest";
 
 export interface ChunkResultItem {
   chunkId: string;
@@ -10,9 +11,9 @@ export interface ChunkResultItem {
   originDate: string;
   correctCount: number;
   totalCount: number;
-  accuracyRate: number; // 0..100 (%)
-  prevAccuracyRate: number | null; // 0..100 (%)
-  status: 'improved' | 'same' | 'worse' | 'first';
+  accuracyRate: number;
+  prevAccuracyRate: number | null;
+  status: "improved" | "same" | "worse" | "first";
 }
 
 interface ChunkSummaryScreenProps {
@@ -22,7 +23,7 @@ interface ChunkSummaryScreenProps {
 }
 
 function formatDateShort(dateStr: string): string {
-  const [, m, d] = dateStr.split('-').map(Number);
+  const [, m, d] = dateStr.split("-").map(Number);
   return `${m}/${d}`;
 }
 
@@ -31,10 +32,19 @@ export function ChunkSummaryScreen({
   totalCount,
   chunkResults,
 }: ChunkSummaryScreenProps) {
+  const router = useRouter();
+  const [isLeaving, setIsLeaving] = useState(false);
   const overallAccuracy = totalCount > 0 ? Math.round((totalCorrect / totalCount) * 100) : 0;
 
+  const handleLeave = () => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    revalidateAfterTest().catch((e) => console.error("Cache revalidation error on leave:", e));
+    router.push("/dashboard");
+  };
+
   return (
-    <div className="flex min-h-[100dvh] flex-col justify-between p-6 md:p-8 lg:p-10 bg-paper max-w-md md:max-w-xl lg:max-w-2xl mx-auto w-full">
+    <div className="flex min-h-[100dvh] flex-col justify-between p-6 md:p-8 lg:p-10 bg-paper max-w-md md:max-w-xl lg:max-w-2xl mx-auto w-full select-none">
       <div className="space-y-6">
         <div className="text-center pt-4">
           <span className="inline-block rounded-full bg-highlighter/40 px-3 py-1 font-maru text-xs font-bold text-ink mb-2">
@@ -62,27 +72,27 @@ export function ChunkSummaryScreen({
           <h2 className="font-mincho text-xs md:text-sm font-bold text-ink/60 px-1">範囲ごとの定着状況</h2>
           <div className="space-y-2">
             {chunkResults.map((chunk) => {
-              let badgeText = '初測定';
-              let badgeClass = 'bg-line/20 text-ink/60 border-line/40';
+              let badgeText = "初測定";
+              let badgeClass = "bg-line/20 text-ink/60 border-line/40";
 
-              if (chunk.status === 'improved') {
-                badgeText = '定着向上 ↑';
-                badgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold';
-              } else if (chunk.status === 'same') {
-                badgeText = '維持 →';
-                badgeClass = 'bg-paper text-ink/70 border-line font-medium';
-              } else if (chunk.status === 'worse') {
-                badgeText = '要復習 ⚠️';
-                badgeClass = 'bg-akashiito/15 text-akashiito border-akashiito-border font-bold';
+              if (chunk.status === "improved") {
+                badgeText = "定着向上 ↑";
+                badgeClass = "bg-emerald-50 text-emerald-800 border-emerald-300 font-bold";
+              } else if (chunk.status === "same") {
+                badgeText = "維持 →";
+                badgeClass = "bg-paper text-ink/70 border-line font-medium";
+              } else if (chunk.status === "worse") {
+                badgeText = "要復習 ⚠️";
+                badgeClass = "bg-akashiito/15 text-akashiito border-akashiito-border font-bold";
               }
 
               return (
                 <div
                   key={chunk.chunkId}
                   className={`flex items-center justify-between rounded-2xl border p-3.5 md:p-4 transition ${
-                    chunk.status === 'worse'
-                      ? 'border-akashiito-border/80 bg-akashiito/5'
-                      : 'border-line bg-white'
+                    chunk.status === "worse"
+                      ? "border-akashiito-border/80 bg-akashiito/5"
+                      : "border-line bg-white"
                   }`}
                 >
                   <div>
@@ -117,12 +127,14 @@ export function ChunkSummaryScreen({
       </div>
 
       <div className="pt-6 pb-2">
-        <Link
-          href="/dashboard"
-          className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90 cursor-pointer"
+        <button
+          type="button"
+          onClick={handleLeave}
+          disabled={isLeaving}
+          className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90 cursor-pointer disabled:opacity-70"
         >
-          ダッシュボードへ戻る
-        </Link>
+          {isLeaving ? "移動中…" : "ダッシュボードへ戻る"}
+        </button>
       </div>
     </div>
   );

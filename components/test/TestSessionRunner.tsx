@@ -7,7 +7,6 @@ import { ChunkSummaryScreen, type ChunkResultItem } from "@/components/weakness/
 import { TestResultScreen } from "@/components/test/TestResultScreen";
 import type { ReviewChunkSummaryInfo } from "@/lib/test/getTodayTestWords";
 import type { LearningPatternBadgeResult } from "@/lib/scoring/diagnoseLearningPattern";
-import { revalidateAfterTest } from "@/lib/actions/revalidateAfterTest";
 import { RefreshCw, Play, RotateCcw, Shuffle, Layers, Info } from "lucide-react";
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -240,8 +239,6 @@ export function TestSessionRunner({
       .then(async (res) => {
         const data = await res.json();
         if (res.ok && data.success) {
-          revalidateAfterTest().catch((e) => console.error("Cache revalidation error:", e));
-
           setSaveStatus({
             isSaving: false,
             isSuccess: true,
