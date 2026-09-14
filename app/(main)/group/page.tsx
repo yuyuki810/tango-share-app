@@ -1,24 +1,26 @@
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-import { redirect } from 'next/navigation';
-import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
-import { getTodayJST, getThisWeekSaturdayJST, getWeekDates } from '@/lib/assignment/weekDates';
-import { Users, User, Trophy, Shuffle, Calendar, Award } from 'lucide-react';
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { getTodayJST, getThisWeekSaturdayJST, getWeekDates } from "@/lib/assignment/weekDates";
+import { Users, User, Trophy, Shuffle, Calendar, Award } from "lucide-react";
 import {
   determineArchetype,
   type DailyScoreEntryData,
   type ArchetypeResult,
-} from '@/lib/scoring/determineArchetype';
-import { computeWeeklyRanking } from '@/lib/scoring/computeWeeklyRanking';
-import { ArchetypeBadge } from '@/components/group/ArchetypeBadge';
-import { CopyButton } from '@/components/common/CopyButton';
-import { LeaveGroupDialog } from '@/components/group/LeaveGroupDialog';
-import { CreateGroupForm } from '@/components/group/CreateGroupForm';
-import { JoinGroupForm } from '@/components/group/JoinGroupForm';
-import { NudgeButton } from '@/components/group/NudgeButton';
-import { NudgeBanner } from '@/components/group/NudgeBanner';
+} from "@/lib/scoring/determineArchetype";
+import { computeWeeklyRanking } from "@/lib/scoring/computeWeeklyRanking";
+import { ArchetypeBadge } from "@/components/group/ArchetypeBadge";
+import { CopyButton } from "@/components/common/CopyButton";
+import { LeaveGroupDialog } from "@/components/group/LeaveGroupDialog";
+import { CreateGroupForm } from "@/components/group/CreateGroupForm";
+import { JoinGroupForm } from "@/components/group/JoinGroupForm";
+import { NudgeButton } from "@/components/group/NudgeButton";
+import { NudgeBanner } from "@/components/group/NudgeBanner";
+import { ReminderSettingCard } from "@/components/group/ReminderSettingCard";
+import { RefreshButton } from "@/components/common/RefreshButton";
 
 interface ScoreEntryWithBonus extends DailyScoreEntryData {
   random_bonus_applied?: boolean;
@@ -32,18 +34,18 @@ interface GroupPageProps {
 
 export default async function GroupPage({ searchParams }: GroupPageProps) {
   const params = await searchParams;
-  const currentTab = params.tab === 'weekly' ? 'weekly' : 'daily';
+  const currentTab = params.tab === "weekly" ? "weekly" : "daily";
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  if (!user) redirect("/login");
 
   const { data: me } = await supabase
-    .from('users')
-    .select('group_id, name')
-    .eq('id', user.id)
+    .from("users")
+    .select("group_id, name")
+    .eq("id", user.id)
     .single();
 
   if (!me?.group_id) {
@@ -76,8 +78,8 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
   const weekDates = getWeekDates(weekStartDate);
 
   const [groupRes, membersRes] = await Promise.all([
-    supabase.from('groups').select('id, name, invite_code').eq('id', me.group_id).single(),
-    supabase.from('users').select('id, name, wordbook_id, wordbooks(name)').eq('group_id', me.group_id),
+    supabase.from("groups").select("id, name, invite_code, reminder_time").eq("id", me.group_id).single(),
+    supabase.from("users").select("id, name, wordbook_id, wordbooks(name)").eq("group_id", me.group_id),
   ]);
 
   const group = groupRes.data;
@@ -94,43 +96,43 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
     receivedNudgesRes,
   ] = await Promise.all([
     supabase
-      .from('test_sessions')
-      .select('user_id')
-      .eq('type', 'daily_check')
-      .eq('date', today)
-      .not('completed_at', 'is', null)
-      .in('user_id', memberIds),
+      .from("test_sessions")
+      .select("user_id")
+      .eq("type", "daily_check")
+      .eq("date", today)
+      .not("completed_at", "is", null)
+      .in("user_id", memberIds),
     supabase
-      .from('daily_score_entries')
-      .select('user_id, date, raw_score, normalized_score, word_count, accuracy_rate, avg_difficulty_weight, avg_diminishing_factor, random_bonus_applied')
-      .eq('date', today)
-      .in('user_id', memberIds),
+      .from("daily_score_entries")
+      .select("user_id, date, raw_score, normalized_score, word_count, accuracy_rate, avg_difficulty_weight, avg_diminishing_factor, random_bonus_applied")
+      .eq("date", today)
+      .in("user_id", memberIds),
     supabase
-      .from('streaks')
-      .select('user_id, current_streak')
-      .in('user_id', memberIds),
+      .from("streaks")
+      .select("user_id, current_streak")
+      .in("user_id", memberIds),
     supabase
-      .from('daily_score_entries')
-      .select('user_id, normalized_score, date')
-      .in('user_id', memberIds)
-      .lt('date', today)
-      .order('date', { ascending: false })
+      .from("daily_score_entries")
+      .select("user_id, normalized_score, date")
+      .in("user_id", memberIds)
+      .lt("date", today)
+      .order("date", { ascending: false })
       .limit(20),
     supabase
-      .from('daily_score_entries')
-      .select('user_id, date, normalized_score, raw_score, accuracy_rate, word_count')
-      .in('user_id', memberIds)
-      .in('date', weekDates),
+      .from("daily_score_entries")
+      .select("user_id, date, normalized_score, raw_score, accuracy_rate, word_count")
+      .in("user_id", memberIds)
+      .in("date", weekDates),
     supabase
-      .from('daily_nudges')
-      .select('target_id')
-      .eq('sender_id', user.id)
-      .eq('date', today),
+      .from("daily_nudges")
+      .select("target_id")
+      .eq("sender_id", user.id)
+      .eq("date", today),
     supabase
-      .from('daily_nudges')
-      .select('sender_id')
-      .eq('target_id', user.id)
-      .eq('date', today),
+      .from("daily_nudges")
+      .select("sender_id")
+      .eq("target_id", user.id)
+      .eq("date", today),
   ]);
 
   const doneUserIds = new Set((todaySessionsRes.data ?? []).map((s) => s.user_id));
@@ -173,56 +175,58 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
     archetypeMap.set(m.id, arch);
   }
 
-  // 週間ランキング集計
   const weeklyRanking = computeWeeklyRanking({
     members: memberList,
     weekDates,
     scoreEntries: (weekScoresRes.data ?? []) as any,
   });
 
-  // 催促(応援)関連データ
   const sentNudgeTargetIds = new Set((sentNudgesRes.data ?? []).map((n) => n.target_id));
+
   const receivedSenderIds = (receivedNudgesRes.data ?? []).map((n: any) => n.sender_id);
   let receivedSenderNames: string[] = [];
   if (receivedSenderIds.length > 0) {
     const { data: senderUsers } = await supabase
-      .from('users')
-      .select('name')
-      .in('id', receivedSenderIds);
+      .from("users")
+      .select("name")
+      .in("id", receivedSenderIds);
     receivedSenderNames = (senderUsers ?? []).map((u) => u.name).filter(Boolean);
   }
 
   return (
     <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl w-full space-y-5 px-4 sm:px-0 pb-28 pt-6">
-      {/* 応援バナー (自分宛てに届いている場合) */}
       <NudgeBanner senderNames={receivedSenderNames} />
 
-      {/* ヘッダー */}
       <div className="flex items-center justify-between">
         <div>
           <span className="font-maru text-[10px] md:text-xs font-bold uppercase tracking-wider text-ink/50">
             GROUP RANKING
           </span>
-          <h1 className="font-mincho text-2xl md:text-3xl font-bold text-ink">{group?.name || 'グループ'}</h1>
+          <h1 className="font-mincho text-2xl md:text-3xl font-bold text-ink">{group?.name || "グループ"}</h1>
         </div>
-        <div className="flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1 font-maru text-xs md:text-sm font-bold text-ink">
-          <Users className="h-3.5 w-3.5 text-ink/60" />
-          <span>{totalCount}人参加中</span>
+        <div className="flex items-center gap-2">
+          <RefreshButton />
+          <div className="flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1 font-maru text-xs md:text-sm font-bold text-ink">
+            <Users className="h-3.5 w-3.5 text-ink/60" />
+            <span>{totalCount}人参加中</span>
+          </div>
         </div>
       </div>
 
-      {/* 招待コード確認エリア */}
       <div className="flex items-center justify-between rounded-2xl bg-amber-50/70 border border-amber-200/80 p-3.5 shadow-2xs">
         <div>
           <span className="block font-maru text-[10px] font-bold text-amber-900/60 uppercase">
             グループ招待コード (仲間を招待)
           </span>
           <span className="font-mono text-base md:text-lg font-bold tracking-widest text-ink">
-            {group?.invite_code || '------'}
+            {group?.invite_code || "------"}
           </span>
         </div>
-        <CopyButton text={group?.invite_code || ''} />
+        <CopyButton text={group?.invite_code || ""} />
       </div>
+
+      {/* グループ自動リマインダー設定カード (誰でも変更可能) */}
+      <ReminderSettingCard currentReminderTime={group?.reminder_time || null} />
 
       {/* 「今日」 / 「今週」 切替セグメントタブ */}
       <div className="grid grid-cols-2 gap-2 rounded-2xl bg-paper/80 border border-line p-1.5 shadow-2xs">
@@ -230,9 +234,9 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
           href="/group?tab=daily"
           prefetch={true}
           className={`flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl font-mincho text-xs md:text-sm font-bold transition ${
-            currentTab === 'daily'
-              ? 'bg-ink text-paper shadow-sm'
-              : 'text-ink/60 hover:text-ink hover:bg-white/50'
+            currentTab === "daily"
+              ? "bg-ink text-paper shadow-sm"
+              : "text-ink/60 hover:text-ink hover:bg-white/50"
           }`}
         >
           <Trophy className="h-3.5 w-3.5" />
@@ -243,9 +247,9 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
           href="/group?tab=weekly"
           prefetch={true}
           className={`flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl font-mincho text-xs md:text-sm font-bold transition ${
-            currentTab === 'weekly'
-              ? 'bg-ink text-paper shadow-sm'
-              : 'text-ink/60 hover:text-ink hover:bg-white/50'
+            currentTab === "weekly"
+              ? "bg-ink text-paper shadow-sm"
+              : "text-ink/60 hover:text-ink hover:bg-white/50"
           }`}
         >
           <Award className="h-3.5 w-3.5" />
@@ -253,12 +257,8 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
         </Link>
       </div>
 
-      {/* ========================================================
-          1. デイリーランキング表示
-          ======================================================== */}
-      {currentTab === 'daily' && (
+      {currentTab === "daily" && (
         <div className="space-y-5 animate-in fade-in duration-150">
-          {/* 今日の進捗サマリー */}
           <div className="rounded-3xl border border-line bg-white p-5 md:p-6 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -277,10 +277,10 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
             </div>
             <p className="font-maru text-[11px] md:text-xs text-ink/50">
               {doneCount === totalCount
-                ? '🎉 本日はグループ全員が本番チェックを完了しました！'
+                ? "🎉 本日はグループ全員が本番チェックを完了しました！"
                 : isMeDone
-                ? 'あなたのスコアが反映されています。他のメンバーの結果を待ちましょう。'
-                : '本番チェックを受験すると、あなたのスコアと順位が表示されます。'}
+                ? "あなたのスコアが反映されています。他のメンバーの結果を待ちましょう。"
+                : "本番チェックを受験すると、あなたのスコアと順位が表示されます。"}
             </p>
 
             {!isMeDone && (
@@ -294,7 +294,6 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
             )}
           </div>
 
-          {/* 今日のランキング一覧 */}
           <section className="space-y-3">
             <div className="flex items-center justify-between px-1">
               <h2 className="font-mincho text-xs md:text-sm font-bold text-ink/60">今日のランキング ({doneMembers.length}人)</h2>
@@ -346,10 +345,10 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
                       key={m.id}
                       className={`flex items-start justify-between rounded-2xl border p-4 md:p-5 shadow-xs transition ${
                         isFirst
-                          ? 'border-amber-300/80 bg-amber-50/40 ring-1 ring-amber-300/50'
+                          ? "border-amber-300/80 bg-amber-50/40 ring-1 ring-amber-300/50"
                           : isMe
-                          ? 'border-line bg-akashiito/5'
-                          : 'border-line bg-white'
+                          ? "border-line bg-akashiito/5"
+                          : "border-line bg-white"
                       }`}
                     >
                       <div className="flex items-start gap-3 md:gap-4">
@@ -404,7 +403,6 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
             )}
           </section>
 
-          {/* 未受験メンバー一覧 & 応援するボタン */}
           {notDoneMembers.length > 0 && (
             <section className="space-y-2.5 pt-2">
               <div className="flex items-center justify-between px-1">
@@ -428,8 +426,8 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
                       key={m.id}
                       className={`flex items-center justify-between rounded-2xl border p-3.5 md:p-4 transition ${
                         isMe
-                          ? 'border-[#EF9F27] bg-[#FEF3E2]'
-                          : 'border-dashed border-line bg-white/60 text-ink/60'
+                          ? "border-[#EF9F27] bg-[#FEF3E2]"
+                          : "border-dashed border-line bg-white/60 text-ink/60"
                       }`}
                     >
                       <div className="flex items-center gap-3">
@@ -470,12 +468,8 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
         </div>
       )}
 
-      {/* ========================================================
-          2. 週間ランキング表示 (新規)
-          ======================================================== */}
-      {currentTab === 'weekly' && (
+      {currentTab === "weekly" && (
         <div className="space-y-5 animate-in fade-in duration-150">
-          {/* 週間ランキングサマリー説明 */}
           <div className="rounded-3xl border border-line bg-white p-5 md:p-6 shadow-xs space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -489,7 +483,6 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
             </p>
           </div>
 
-          {/* 週間ランキング一覧 */}
           <section className="space-y-2.5">
             {weeklyRanking.map((m, index) => {
               const isMe = m.userId === user.id;
@@ -521,10 +514,10 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
                   key={m.userId}
                   className={`flex items-start justify-between rounded-2xl border p-4 md:p-5 shadow-xs transition ${
                     isFirst
-                      ? 'border-amber-300/80 bg-amber-50/40 ring-1 ring-amber-300/50'
+                      ? "border-amber-300/80 bg-amber-50/40 ring-1 ring-amber-300/50"
                       : isMe
-                      ? 'border-line bg-akashiito/5'
-                      : 'border-line bg-white'
+                      ? "border-line bg-akashiito/5"
+                      : "border-line bg-white"
                   }`}
                 >
                   <div className="flex items-start gap-3 md:gap-4">
@@ -545,18 +538,17 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
                         )}
                       </div>
 
-                      {/* 7日間の達成状況インジケータ */}
                       <div className="flex items-center gap-1 mt-2">
                         <span className="font-maru text-[9px] text-ink/40 mr-0.5">進捗:</span>
-                        {m.dailyScores.map((ds, dIdx) => (
+                        {m.dailyScores.map((ds) => (
                           <span
                             key={ds.date}
                             className={`h-2 w-3.5 rounded-xs inline-block ${
                               ds.attended
-                                ? 'bg-emerald-600 shadow-2xs'
-                                : 'bg-line/40'
+                                ? "bg-emerald-600 shadow-2xs"
+                                : "bg-line/40"
                             }`}
-                            title={`${ds.date}: ${ds.attended ? `${ds.score}点` : '未受験(0点)'}`}
+                            title={`${ds.date}: ${ds.attended ? `${ds.score}点` : "未受験(0点)"}`}
                           />
                         ))}
                         <span className="font-maru text-[10px] font-bold text-ink/60 ml-1">
@@ -567,7 +559,7 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
                   </div>
 
                   <div className="text-right shrink-0">
-                    <span className="font-maru text-[10px] md:text-xs font-medium text-ink/50 block">週間平均</span>
+                    <span className="font-maru text-[10px] md:text-xs font-medium text-ink/50 block">獲得スコア</span>
                     <div className="flex items-baseline justify-end gap-0.5">
                       <span className="font-mincho text-2xl md:text-3xl font-bold tracking-tight text-ink">
                         {m.weeklyScore}
@@ -585,7 +577,6 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
         </div>
       )}
 
-      {/* グループ脱退ダイアログ */}
       <div className="pt-4 border-t border-line/40 flex justify-center">
         <LeaveGroupDialog />
       </div>

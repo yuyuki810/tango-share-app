@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
-import Link from 'next/link';
-import { ChevronLeft, SlidersHorizontal } from 'lucide-react';
-import type { ChunkStat } from '@/lib/weakness/computeChunkStats';
-import { WeaknessGrid } from './WeaknessGrid';
-import { WeaknessBottomSheet } from './WeaknessBottomSheet';
-import { DrillFilterDialog } from './DrillFilterDialog';
+import React, { useState } from "react";
+import Link from "next/link";
+import { ChevronLeft, SlidersHorizontal } from "lucide-react";
+import { RefreshButton } from "@/components/common/RefreshButton";
+import type { ChunkStat } from "@/lib/weakness/computeChunkStats";
+import { WeaknessGrid } from "./WeaknessGrid";
+import { WeaknessBottomSheet } from "./WeaknessBottomSheet";
+import { DrillFilterDialog } from "./DrillFilterDialog";
 
 interface WeaknessMapClientProps {
   chunks: ChunkStat[];
@@ -38,9 +39,10 @@ export function WeaknessMapClient({ chunks, wordbookName, todayJst }: WeaknessMa
           <div>
             <h1 className="font-mincho text-2xl md:text-3xl font-bold text-ink">弱点マップ</h1>
             <p className="font-maru text-xs md:text-sm text-ink/50 mt-0.5">
-              {wordbookName || '単語帳'} の週ごとの進度と定着傾向
+              {wordbookName || "単語帳"} の週ごとの進度と定着傾向
             </p>
           </div>
+          <RefreshButton />
         </div>
       </div>
 
@@ -52,7 +54,7 @@ export function WeaknessMapClient({ chunks, wordbookName, todayJst }: WeaknessMa
         </div>
         <div className="rounded-2xl border border-line bg-white p-3 text-center shadow-xs">
           <span className="block font-maru text-[10px] text-ink/50">要注意範囲</span>
-          <span className={`font-mincho text-xl font-bold ${attentionCount > 0 ? 'text-akashiito' : 'text-ink'}`}>
+          <span className={`font-mincho text-xl font-bold ${attentionCount > 0 ? "text-akashiito" : "text-ink"}`}>
             {attentionCount}
           </span>
           <span className="font-maru text-[10px] text-ink/40 ml-0.5">箇所</span>

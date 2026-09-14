@@ -6,6 +6,8 @@ import type { WordCardData } from "@/components/review/WordJudgeCard";
 import { ChunkSummaryScreen, type ChunkResultItem } from "@/components/weakness/ChunkSummaryScreen";
 import { TestResultScreen } from "@/components/test/TestResultScreen";
 import type { ReviewChunkSummaryInfo } from "@/lib/test/getTodayTestWords";
+import type { LearningPatternBadgeResult } from "@/lib/scoring/diagnoseLearningPattern";
+import { revalidateAfterTest } from "@/lib/actions/revalidateAfterTest";
 import { RefreshCw, Play, RotateCcw, Shuffle, Layers, Info } from "lucide-react";
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -62,6 +64,8 @@ export function TestSessionRunner({
     totalCount: number;
     wrongCards: WordCardData[];
     chunkResults?: ChunkResultItem[];
+    dailyScore?: any;
+    learningPatternBadge?: LearningPatternBadgeResult | null;
   } | null>(null);
 
   const [saveStatus, setSaveStatus] = useState<{
@@ -223,60 +227,6 @@ export function TestSessionRunner({
     const totalCount = results.length;
     const wrongCards = cards.filter((c) => !(resultsMap.get(c.wordId) ?? false));
 
-    if (isReviewDay && reviewChunks.length > 0) {
-      const chunkResults: ChunkResultItem[] = reviewChunks.map((rc) => {
-        const chunkCards = cards.filter(
-          (c) =>
-            c.originDailyAssignmentId === rc.chunkId ||
-            (typeof c.number === "number" &&
-              c.number >= rc.rangeStart &&
-              c.number <= rc.rangeEnd)
-        );
-        const cTotal = chunkCards.length;
-        const cCorrect = chunkCards.filter((c) => resultsMap.get(c.wordId) ?? false).length;
-        const cAccuracy = cTotal > 0 ? Math.round((cCorrect / cTotal) * 100) : 0;
-
-        let status: "improved" | "same" | "worse" | "first" = "first";
-        if (rc.prevAccuracyRate !== null) {
-          const diff = cAccuracy - rc.prevAccuracyRate;
-          if (diff >= 10) {
-            status = "improved";
-          } else if (diff <= -10) {
-            status = "worse";
-          } else {
-            status = "same";
-          }
-        } else {
-          status = "first";
-        }
-
-        return {
-          chunkId: rc.chunkId,
-          rangeStart: rc.rangeStart,
-          rangeEnd: rc.rangeEnd,
-          originDate: rc.originDate,
-          correctCount: cCorrect,
-          totalCount: cTotal,
-          accuracyRate: cAccuracy,
-          prevAccuracyRate: rc.prevAccuracyRate,
-          status,
-        };
-      });
-
-      setResultData({
-        correctCount,
-        totalCount,
-        wrongCards,
-        chunkResults,
-      });
-    } else {
-      setResultData({
-        correctCount,
-        totalCount,
-        wrongCards,
-      });
-    }
-
     setSaveStatus({ isSaving: true, isSuccess: false });
 
     fetch("/api/test-sessions/complete", {
@@ -290,17 +240,76 @@ export function TestSessionRunner({
       .then(async (res) => {
         const data = await res.json();
         if (res.ok && data.success) {
+          revalidateAfterTest().catch((e) => console.error("Cache revalidation error:", e));
+
           setSaveStatus({
             isSaving: false,
             isSuccess: true,
             savedCount: data.savedAnswersCount ?? results.length,
           });
+
+          if (isReviewDay && reviewChunks.length > 0) {
+            const chunkResults: ChunkResultItem[] = reviewChunks.map((rc) => {
+              const chunkCards = cards.filter(
+                (c) =>
+                  c.originDailyAssignmentId === rc.chunkId ||
+                  (typeof c.number === "number" &&
+                    c.number >= rc.rangeStart &&
+                    c.number <= rc.rangeEnd)
+              );
+              const cTotal = chunkCards.length;
+              const cCorrect = chunkCards.filter((c) => resultsMap.get(c.wordId) ?? false).length;
+              const cAccuracy = cTotal > 0 ? Math.round((cCorrect / cTotal) * 100) : 0;
+
+              let status: "improved" | "same" | "worse" | "first" = "first";
+              if (rc.prevAccuracyRate !== null) {
+                const diff = cAccuracy - rc.prevAccuracyRate;
+                if (diff >= 10) status = "improved";
+                else if (diff <= -10) status = "worse";
+                else status = "same";
+              }
+
+              return {
+                chunkId: rc.chunkId,
+                rangeStart: rc.rangeStart,
+                rangeEnd: rc.rangeEnd,
+                originDate: rc.originDate,
+                correctCount: cCorrect,
+                totalCount: cTotal,
+                accuracyRate: cAccuracy,
+                prevAccuracyRate: rc.prevAccuracyRate,
+                status,
+              };
+            });
+
+            setResultData({
+              correctCount,
+              totalCount,
+              wrongCards,
+              chunkResults,
+              dailyScore: data.dailyScore,
+              learningPatternBadge: data.learningPatternBadge,
+            });
+          } else {
+            setResultData({
+              correctCount,
+              totalCount,
+              wrongCards,
+              dailyScore: data.dailyScore,
+              learningPatternBadge: data.learningPatternBadge,
+            });
+          }
         } else {
           setSaveStatus({
             isSaving: false,
             isSuccess: false,
             errorMessage: data.error || "保存エラー",
             detail: data.detail || `HTTP ${res.status}`,
+          });
+          setResultData({
+            correctCount,
+            totalCount,
+            wrongCards,
           });
         }
       })
@@ -311,6 +320,11 @@ export function TestSessionRunner({
           isSuccess: false,
           errorMessage: "通信エラー",
           detail: err?.message || String(err),
+        });
+        setResultData({
+          correctCount,
+          totalCount,
+          wrongCards,
         });
       });
   };
@@ -420,6 +434,8 @@ export function TestSessionRunner({
         saveStatus={saveStatus}
         backUrl={backUrl}
         backLabel={backLabel}
+        dailyScore={resultData.dailyScore}
+        learningPatternBadge={resultData.learningPatternBadge}
       />
     );
   }
