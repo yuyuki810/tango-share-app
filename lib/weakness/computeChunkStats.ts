@@ -84,7 +84,7 @@ export async function computeChunkStats(
     word_id: string;
     session_id: string;
     session_type: string;
-    is_retry?: boolean;
+    is_retry: boolean;
     date: string;
     created_at: string;
   }> = [];
@@ -132,7 +132,7 @@ export async function computeChunkStats(
           date: ans.date,
           created_at: ans.created_at,
           type: ans.session_type,
-          is_retry: ans.is_retry,
+          is_retry: !!ans.is_retry,
           answers: [],
         });
       }
