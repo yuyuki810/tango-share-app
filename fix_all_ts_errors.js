@@ -379,4 +379,4 @@ writeFile('lib/assignment/calculateAssignments.ts', calculateAssignmentsTs);
 
 console.log('\n================================================================');
 console.log('✅ すべてのTypeScriptエラーの修正が完了しました！');
-console.log('================================================================\n');
+console.log('================================================================\n');nod

@@ -31,6 +31,8 @@ interface TestPageProps {
     days?: string;
     random?: string;
     t?: string;
+    retrySessionId?: string;
+    from?: string;
   }>;
 }
 
@@ -43,7 +45,11 @@ export default async function TestPage({ searchParams }: TestPageProps) {
   const filterDays = params.days ? Number(params.days) : undefined;
   const isRandomOrder = params.random === 'true';
 
-  const isFromWeakness = !!params.originAssignmentId || !!params.rangeStart || params.weak === 'true';
+  const isFromWeakness =
+    params.from === 'weakness' ||
+    !!params.originAssignmentId ||
+    !!params.rangeStart ||
+    params.weak === 'true';
   const backUrl = isFromWeakness ? '/weakness' : '/dashboard';
   const backLabel = isFromWeakness ? '弱点マップへ戻る' : 'ダッシュボードへ戻る';
 
@@ -61,6 +67,80 @@ export default async function TestPage({ searchParams }: TestPageProps) {
 
   if (!profile?.wordbook_id) {
     redirect('/dashboard');
+  }
+
+  // F-15新設: 直前のテストで間違えた単語の即時復習テスト
+  if (params.retrySessionId) {
+    const { data: wrongAnswers, error: answersError } = await supabase
+      .from('test_answers')
+      .select('word_id, origin_daily_assignment_id')
+      .eq('session_id', params.retrySessionId)
+      .eq('is_known', false)
+      .order('created_at', { ascending: true });
+
+    if (answersError || !wrongAnswers || wrongAnswers.length === 0) {
+      return (
+        <main className="mx-auto flex h-[80vh] max-w-md md:max-w-xl flex-col items-center justify-center gap-4 px-4 text-center">
+          <p className="font-mincho text-lg text-ink">復習する間違えた単語はありません！</p>
+          <p className="font-maru text-xs text-ink/60">すべて正解しているか、修正済みです。</p>
+          <Link
+            href={backUrl}
+            className="rounded-xl border border-line bg-white px-4 py-2 text-xs text-ink shadow-sm font-maru"
+          >
+            {backLabel}
+          </Link>
+        </main>
+      );
+    }
+
+    const uniqueWordIds: string[] = [];
+    const seenSet = new Set<string>();
+    for (const a of wrongAnswers) {
+      if (!seenSet.has(a.word_id)) {
+        seenSet.add(a.word_id);
+        uniqueWordIds.push(a.word_id);
+      }
+    }
+
+    const { data: wordsData } = await supabase
+      .from('words')
+      .select('id, word, pronunciation, meaning, number')
+      .in('id', uniqueWordIds);
+
+    const wordsMap = new Map((wordsData ?? []).map((w) => [w.id, w]));
+
+    let retryCards = uniqueWordIds.map((wid) => {
+      const w = wordsMap.get(wid);
+      return {
+        wordId: wid,
+        headword: w?.word ?? '',
+        pronunciation: w?.pronunciation ?? undefined,
+        meaning: w?.meaning ?? '',
+        studyCount: 1,
+        originDailyAssignmentId: wrongAnswers[0]?.origin_daily_assignment_id || undefined,
+        number: w?.number,
+      };
+    });
+
+    if (isRandomOrder) {
+      retryCards = shuffleArray(retryCards);
+    }
+
+    return (
+      <main className="mx-auto h-[100dvh] max-w-md md:max-w-xl lg:max-w-2xl bg-paper">
+        <TestSessionRunner
+          key={`retry-${params.retrySessionId}-${isRandomOrder}-${Date.now()}`}
+          cards={retryCards}
+          dailyAssignmentId={wrongAnswers[0]?.origin_daily_assignment_id || null}
+          sessionType="normal"
+          isReviewDay={false}
+          backUrl={backUrl}
+          backLabel={backLabel}
+          isRandomOrder={isRandomOrder}
+          initialForceNew={true}
+        />
+      </main>
+    );
   }
 
   // 1. チャンク指定 または 週番号範囲指定の苦手克服テスト

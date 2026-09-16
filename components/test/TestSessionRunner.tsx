@@ -27,6 +27,7 @@ interface TestSessionRunnerProps {
   backUrl?: string;
   backLabel?: string;
   isRandomOrder?: boolean;
+  initialForceNew?: boolean;
 }
 
 interface ResumeState {
@@ -44,6 +45,7 @@ export function TestSessionRunner({
   backUrl = "/dashboard",
   backLabel = "ダッシュボードへ戻る",
   isRandomOrder = false,
+  initialForceNew = false,
 }: TestSessionRunnerProps) {
   const [cards, setCards] = useState<WordCardData[]>(() =>
     isRandomOrder ? shuffleArray(initialCards) : initialCards
@@ -91,7 +93,7 @@ export function TestSessionRunner({
         totalCount: currentCardList.length,
         wordIds: cardWordIds,
         isRandomOrder,
-        forceNew,
+        forceNew: forceNew || initialForceNew,
       }),
     })
       .then(async (res) => {
@@ -153,8 +155,8 @@ export function TestSessionRunner({
   useEffect(() => {
     const list = isRandomOrder ? shuffleArray(initialCards) : initialCards;
     setCards(list);
-    initSession(list, false);
-  }, [sessionType, dailyAssignmentId, initialCards, isRandomOrder]);
+    initSession(list, initialForceNew);
+  }, [sessionType, dailyAssignmentId, initialCards, isRandomOrder, initialForceNew]);
 
   const handleRestartFromScratch = () => {
     let nextCards = initialCards;
@@ -433,6 +435,7 @@ export function TestSessionRunner({
         backLabel={backLabel}
         dailyScore={resultData.dailyScore}
         learningPatternBadge={resultData.learningPatternBadge}
+        completedSessionId={sessionId}
       />
     );
   }
