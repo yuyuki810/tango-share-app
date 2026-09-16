@@ -84,6 +84,7 @@ export async function computeChunkStats(
     word_id: string;
     session_id: string;
     session_type: string;
+    is_retry?: boolean;
     date: string;
     created_at: string;
   }> = [];
