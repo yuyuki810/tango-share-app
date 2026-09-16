@@ -138,6 +138,7 @@ export default async function TestPage({ searchParams }: TestPageProps) {
           backLabel={backLabel}
           isRandomOrder={isRandomOrder}
           initialForceNew={true}
+          isRetry={true}
         />
       </main>
     );

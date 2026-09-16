@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
       wordIds = [],
       isRandomOrder = false,
       forceNew = false,
+      isRetry = false,
     } = body;
     const today = getTodayJST();
 
@@ -116,6 +117,7 @@ export async function POST(req: NextRequest) {
         total_count: totalCount,
         completed_at: null,
         is_random_order: isRandomOrder,
+        is_retry: isRetry,
       })
       .select('id, type, date, total_count, correct_count, created_at, is_random_order')
       .single();

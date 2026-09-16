@@ -28,6 +28,7 @@ interface TestSessionRunnerProps {
   backLabel?: string;
   isRandomOrder?: boolean;
   initialForceNew?: boolean;
+  isRetry?: boolean;
 }
 
 interface ResumeState {
@@ -46,6 +47,7 @@ export function TestSessionRunner({
   backLabel = "ダッシュボードへ戻る",
   isRandomOrder = false,
   initialForceNew = false,
+  isRetry = false,
 }: TestSessionRunnerProps) {
   const [cards, setCards] = useState<WordCardData[]>(() =>
     isRandomOrder ? shuffleArray(initialCards) : initialCards
@@ -94,6 +96,7 @@ export function TestSessionRunner({
         wordIds: cardWordIds,
         isRandomOrder,
         forceNew: forceNew || initialForceNew,
+        isRetry,
       }),
     })
       .then(async (res) => {

@@ -47,7 +47,7 @@ export async function computeChunkStats(
       .order('date', { ascending: true }),
     supabase
       .from('test_sessions')
-      .select('id, date, type, completed_at, created_at, test_answers(id, is_known, origin_daily_assignment_id, word_id, created_at)')
+      .select('id, date, type, is_retry, completed_at, created_at, test_answers(id, is_known, origin_daily_assignment_id, word_id, created_at)')
       .eq('user_id', userId)
       .order('created_at', { ascending: true }),
   ]);
@@ -98,6 +98,7 @@ export async function computeChunkStats(
         word_id: a.word_id,
         session_id: s.id,
         session_type: s.type || 'normal',
+        is_retry: s.is_retry || false,
         date: s.date,
         created_at: a.created_at || s.created_at,
       });
@@ -120,7 +121,7 @@ export async function computeChunkStats(
 
     const sessionMap = new Map<
       string,
-      { date: string; created_at: string; type: string; answers: typeof chunkAnswers }
+      { date: string; created_at: string; type: string; is_retry: boolean; answers: typeof chunkAnswers }
     >();
 
     chunkAnswers.forEach((ans) => {
@@ -130,6 +131,7 @@ export async function computeChunkStats(
           date: ans.date,
           created_at: ans.created_at,
           type: ans.session_type,
+          is_retry: ans.is_retry,
           answers: [],
         });
       }
@@ -144,6 +146,11 @@ export async function computeChunkStats(
     const drillHistory: ChunkHistoryPoint[] = [];
 
     sortedSessions.forEach((s) => {
+      // 間違えた単語の即時復習テスト(is_retry=true)は、弱点マップの全体推移にもドリル推移にも含めない
+      if (s.is_retry) {
+        return;
+      }
+
       const sTotal = s.answers.length;
       const sCorrect = s.answers.filter((a) => a.is_known).length;
       const accuracyRate = sTotal > 0 ? Math.round((sCorrect / sTotal) * 100) : 0;
