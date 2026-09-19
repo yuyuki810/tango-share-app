@@ -20,28 +20,30 @@ function formatDateLabel(dateStr: string): string {
 export function ScoreTrendCard({ scoreHistory }: ScoreTrendCardProps) {
   const [isOpen, setIsOpen] = useState(true);
 
-  if (scoreHistory.length === 0) return null;
-
   const chartWidth = 320;
   const chartHeight = 80;
   const paddingX = 35;
   const paddingY = 16;
 
-  const points = scoreHistory.map((h, i) => {
-    const x =
-      scoreHistory.length === 1
-        ? chartWidth / 2
-        : paddingX + (i / (scoreHistory.length - 1)) * (chartWidth - paddingX * 2);
+  const hasData = scoreHistory.length > 0;
 
-    const y = chartHeight - paddingY - (h.normalizedScore / 100) * (chartHeight - paddingY * 2);
+  const points = hasData
+    ? scoreHistory.map((h, i) => {
+        const x =
+          scoreHistory.length === 1
+            ? chartWidth / 2
+            : paddingX + (i / (scoreHistory.length - 1)) * (chartWidth - paddingX * 2);
 
-    return {
-      x,
-      y,
-      score: h.normalizedScore,
-      date: formatDateLabel(h.date),
-    };
-  });
+        const y = chartHeight - paddingY - (h.normalizedScore / 100) * (chartHeight - paddingY * 2);
+
+        return {
+          x,
+          y,
+          score: h.normalizedScore,
+          date: formatDateLabel(h.date),
+        };
+      })
+    : [];
 
   const pathD =
     points.length > 1
@@ -51,8 +53,8 @@ export function ScoreTrendCard({ scoreHistory }: ScoreTrendCardProps) {
         )
       : "";
 
-  const latestScore = scoreHistory[scoreHistory.length - 1]?.normalizedScore ?? 0;
-  const maxScore = Math.max(...scoreHistory.map((s) => s.normalizedScore));
+  const latestScore = hasData ? scoreHistory[scoreHistory.length - 1]?.normalizedScore ?? 0 : 0;
+  const maxScore = hasData ? Math.max(...scoreHistory.map((s) => s.normalizedScore)) : 0;
 
   return (
     <div className="rounded-3xl border border-line bg-white shadow-xs overflow-hidden transition-all text-left">
@@ -70,7 +72,7 @@ export function ScoreTrendCard({ scoreHistory }: ScoreTrendCardProps) {
               スコア推移グラフ (直近30日)
             </h3>
             <span className="font-maru text-[10px] text-ink/50">
-              最高: {maxScore}点 / 最新: {latestScore}点
+              {hasData ? `最高: ${maxScore}点 / 最新: ${latestScore}点` : "日々の学習成果を可視化"}
             </span>
           </div>
         </div>
@@ -82,36 +84,43 @@ export function ScoreTrendCard({ scoreHistory }: ScoreTrendCardProps) {
 
       {isOpen && (
         <div className="px-4 pb-5 pt-1 space-y-3 border-t border-line/40">
-          <div className="w-full overflow-x-auto py-2">
-            <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-24 w-full overflow-visible">
-              <line x1={paddingX} y1={paddingY} x2={chartWidth - paddingX} y2={paddingY} stroke="#EBE8DF" strokeWidth="1" strokeDasharray="3,3" />
-              <line x1={paddingX} y1={chartHeight / 2} x2={chartWidth - paddingX} y2={chartHeight / 2} stroke="#EBE8DF" strokeWidth="1" strokeDasharray="3,3" />
-              <line x1={paddingX} y1={chartHeight - paddingY} x2={chartWidth - paddingX} y2={chartHeight - paddingY} stroke="#EBE8DF" strokeWidth="1" />
+          {hasData ? (
+            <div className="w-full overflow-x-auto py-2">
+              <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-24 w-full overflow-visible">
+                <line x1={paddingX} y1={paddingY} x2={chartWidth - paddingX} y2={paddingY} stroke="#EBE8DF" strokeWidth="1" strokeDasharray="3,3" />
+                <line x1={paddingX} y1={chartHeight / 2} x2={chartWidth - paddingX} y2={chartHeight / 2} stroke="#EBE8DF" strokeWidth="1" strokeDasharray="3,3" />
+                <line x1={paddingX} y1={chartHeight - paddingY} x2={chartWidth - paddingX} y2={chartHeight - paddingY} stroke="#EBE8DF" strokeWidth="1" />
 
-              {pathD && (
-                <path
-                  d={pathD}
-                  fill="none"
-                  stroke="#378ADD"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              )}
+                {pathD && (
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke="#378ADD"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
 
-              {points.map((p, i) => (
-                <g key={i}>
-                  <circle cx={p.x} cy={p.y} r="4" fill="#378ADD" stroke="#FFFFFF" strokeWidth="2" />
-                  <text x={p.x} y={p.y - 7} textAnchor="middle" fill="#185FA5" className="text-[10px] font-bold font-mono">
-                    {p.score}
-                  </text>
-                  <text x={p.x} y={chartHeight + 1} textAnchor="middle" className="fill-ink/40 text-[9px] font-maru">
-                    {p.date}
-                  </text>
-                </g>
-              ))}
-            </svg>
-          </div>
+                {points.map((p, i) => (
+                  <g key={i}>
+                    <circle cx={p.x} cy={p.y} r="4" fill="#378ADD" stroke="#FFFFFF" strokeWidth="2" />
+                    <text x={p.x} y={p.y - 7} textAnchor="middle" fill="#185FA5" className="text-[10px] font-bold font-mono">
+                      {p.score}
+                    </text>
+                    <text x={p.x} y={chartHeight + 1} textAnchor="middle" className="fill-ink/40 text-[9px] font-maru">
+                      {p.date}
+                    </text>
+                  </g>
+                ))}
+              </svg>
+            </div>
+          ) : (
+            <div className="p-4 rounded-2xl bg-paper/60 border border-line/60 text-center">
+              <p className="font-mincho text-xs font-bold text-ink/60">まだスコア記録がありません</p>
+              <p className="font-maru text-[10px] text-ink/40 mt-0.5">本番チェックを受験すると、ここに過去30日間の成長推移が表示されます</p>
+            </div>
+          )}
         </div>
       )}
     </div>
