@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { TrendingUp, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState } from "react";
+import { TrendingUp, ChevronDown, ChevronUp } from "lucide-react";
 
 interface ScoreEntryPoint {
   date: string;
@@ -13,7 +13,7 @@ interface ScoreTrendCardProps {
 }
 
 function formatDateLabel(dateStr: string): string {
-  const [, m, d] = dateStr.split(-).map(Number);
+  const [, m, d] = dateStr.split("-").map(Number);
   return `${m}/${d}`;
 }
 
@@ -46,10 +46,10 @@ export function ScoreTrendCard({ scoreHistory }: ScoreTrendCardProps) {
   const pathD =
     points.length > 1
       ? points.reduce(
-          (acc, p, idx) => `${acc} ${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`,
-          ''
+          (acc, p, idx) => `${acc} ${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`,
+          ""
         )
-      : '';
+      : "";
 
   const latestScore = scoreHistory[scoreHistory.length - 1]?.normalizedScore ?? 0;
   const maxScore = Math.max(...scoreHistory.map((s) => s.normalizedScore));
