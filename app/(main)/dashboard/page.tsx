@@ -1,21 +1,23 @@
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
 import {
   getTodayJST,
   getThisWeekSaturdayJST,
   getPreviousSaturday,
   getWeekDates,
-} from '@/lib/assignment/weekDates';
-import { TodayRangeCard } from '@/components/dashboard/TodayRangeCard';
-import { WeeklySchedule } from '@/components/dashboard/WeeklySchedule';
-import { SetRangeCTA } from '@/components/dashboard/SetRangeCTA';
-import { NudgeBanner } from '@/components/group/NudgeBanner';
-import { NotificationEnableCard } from '@/components/pwa/NotificationEnableCard';
-import type { CycleType, DayType } from '@/lib/assignment/cycleTypes';
-import type { LastWeekData } from '@/components/weekly-range/CycleSettingsPanel';
+} from "@/lib/assignment/weekDates";
+import { TodayRangeCard } from "@/components/dashboard/TodayRangeCard";
+import { WeeklySchedule } from "@/components/dashboard/WeeklySchedule";
+import { SetRangeCTA } from "@/components/dashboard/SetRangeCTA";
+import { NudgeBanner } from "@/components/group/NudgeBanner";
+import { NotificationEnableCard } from "@/components/pwa/NotificationEnableCard";
+import { LevelBadge } from "@/components/dashboard/LevelBadge";
+import { ScoreTrendCard } from "@/components/dashboard/ScoreTrendCard";
+import type { CycleType, DayType } from "@/lib/assignment/cycleTypes";
+import type { LastWeekData } from "@/components/weekly-range/CycleSettingsPanel";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -39,54 +41,61 @@ export default async function DashboardPage() {
     assignmentsRes,
     incompleteSessionRes,
     receivedNudgesRes,
+    scoreHistoryRes, // F-16: スコア推移履歴
   ] = await Promise.all([
     supabase
-      .from('users')
-      .select('wordbook_id, wordbooks(name, total_words)')
-      .eq('id', user.id)
+      .from("users")
+      .select("wordbook_id, total_exp, wordbooks(name, total_words)")
+      .eq("id", user.id)
       .single(),
     supabase
-      .from('test_sessions')
-      .select('date')
-      .eq('user_id', user.id)
-      .eq('type', 'daily_check')
-      .not('completed_at', 'is', null)
-      .in('date', weekDates),
+      .from("test_sessions")
+      .select("date")
+      .eq("user_id", user.id)
+      .eq("type", "daily_check")
+      .not("completed_at", "is", null)
+      .in("date", weekDates),
     supabase
-      .from('streaks')
-      .select('current_streak')
-      .eq('user_id', user.id)
+      .from("streaks")
+      .select("current_streak")
+      .eq("user_id", user.id)
       .maybeSingle(),
     supabase
-      .from('weekly_ranges')
-      .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')
-      .eq('user_id', user.id)
-      .eq('week_start_date', weekStartDate)
+      .from("weekly_ranges")
+      .select("range_start, range_end, per_day_count, cycle_type, custom_day_types")
+      .eq("user_id", user.id)
+      .eq("week_start_date", weekStartDate)
       .maybeSingle(),
     supabase
-      .from('weekly_ranges')
-      .select('range_start, range_end, per_day_count, cycle_type, custom_day_types')
-      .eq('user_id', user.id)
-      .eq('week_start_date', prevWeekStartDate)
+      .from("weekly_ranges")
+      .select("range_start, range_end, per_day_count, cycle_type, custom_day_types")
+      .eq("user_id", user.id)
+      .eq("week_start_date", prevWeekStartDate)
       .maybeSingle(),
     supabase
-      .from('daily_assignments')
-      .select('date, range_start, range_end, is_review_day')
-      .eq('user_id', user.id)
-      .in('date', weekDates),
+      .from("daily_assignments")
+      .select("date, range_start, range_end, is_review_day")
+      .eq("user_id", user.id)
+      .in("date", weekDates),
     supabase
-      .from('test_sessions')
-      .select('id, type, date')
-      .eq('user_id', user.id)
-      .eq('type', 'daily_check')
-      .eq('date', today)
-      .is('completed_at', null)
+      .from("test_sessions")
+      .select("id, type, date")
+      .eq("user_id", user.id)
+      .eq("type", "daily_check")
+      .eq("date", today)
+      .is("completed_at", null)
       .maybeSingle(),
     supabase
-      .from('daily_nudges')
-      .select('sender_id')
-      .eq('target_id', user.id)
-      .eq('date', today),
+      .from("daily_nudges")
+      .select("sender_id")
+      .eq("target_id", user.id)
+      .eq("date", today),
+    supabase
+      .from("daily_score_entries")
+      .select("date, normalized_score")
+      .eq("user_id", user.id)
+      .order("date", { ascending: false })
+      .limit(30),
   ]);
 
   const profile = profileRes.data;
@@ -97,13 +106,20 @@ export default async function DashboardPage() {
   const weeklyRange = weeklyRangeRes.data;
   const prevWeeklyRange = prevWeeklyRangeRes.data;
 
+  // F-16: 取得したデータの変換
+  const totalExp = profile?.total_exp ?? 0;
+  const scoreHistory = (scoreHistoryRes.data ?? [])
+    .slice()
+    .reverse() // 表示用に昇順へ反転
+    .map((d) => ({ date: d.date, normalizedScore: d.normalized_score }));
+
   const receivedSenderIds = (receivedNudgesRes.data ?? []).map((n: any) => n.sender_id);
   let receivedSenderNames: string[] = [];
   if (receivedSenderIds.length > 0) {
     const { data: senderUsers } = await supabase
-      .from('users')
-      .select('name')
-      .in('id', receivedSenderIds);
+      .from("users")
+      .select("name")
+      .in("id", receivedSenderIds);
     receivedSenderNames = (senderUsers ?? []).map((u) => u.name).filter(Boolean);
   }
 
@@ -114,7 +130,7 @@ export default async function DashboardPage() {
         perDayCount:
           prevWeeklyRange.per_day_count ??
           Math.max(1, Math.round((prevWeeklyRange.range_end - prevWeeklyRange.range_start + 1) / 5)),
-        cycleType: (prevWeeklyRange.cycle_type as CycleType) ?? 'five_two',
+        cycleType: (prevWeeklyRange.cycle_type as CycleType) ?? "five_two",
         customDayTypes: (prevWeeklyRange.custom_day_types as DayType[]) ?? undefined,
       }
     : undefined;
@@ -135,12 +151,11 @@ export default async function DashboardPage() {
 
   const todayAssignment = assignmentByDate.get(today);
   const wordbookData = profile?.wordbooks as { name?: string; total_words?: number } | null;
-  const wordbookName = wordbookData?.name ?? '';
+  const wordbookName = wordbookData?.name ?? "";
   const wordbookTotalWords = wordbookData?.total_words ?? 0;
 
   return (
     <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl w-full space-y-5 px-4 sm:px-0 pb-24 pt-6">
-      {/* 未受験時に仲間から応援が届いていればバナーを表示 */}
       {!isDailyCheckCompleted && receivedSenderNames.length > 0 && (
         <NudgeBanner senderNames={receivedSenderNames} />
       )}
@@ -165,11 +180,13 @@ export default async function DashboardPage() {
         </div>
       </header>
 
-      {/* 通知有効化カード */}
+      {/* F-16: レベルバッジをヘッダー直下に配置 */}
+      <LevelBadge totalExp={totalExp} />
+
       <NotificationEnableCard />
 
       <SetRangeCTA
-        wordbookId={profile?.wordbook_id ?? ''}
+        wordbookId={profile?.wordbook_id ?? ""}
         wordbookTotalWords={wordbookTotalWords}
         weekStartDate={weekStartDate}
         hasExistingRange={!!weeklyRange}
@@ -203,6 +220,9 @@ export default async function DashboardPage() {
         </div>
         <WeeklySchedule days={weekDays} todayDate={today} />
       </section>
+
+      {/* F-16: スコア推移グラフをスケジュール直下に配置 */}
+      <ScoreTrendCard scoreHistory={scoreHistory} />
     </main>
   );
 }

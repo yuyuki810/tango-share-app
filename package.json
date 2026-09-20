@@ -13,6 +13,7 @@
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
     "@types/web-push": "^3.6.4",
+    "@vercel/analytics": "^2.0.1",
     "clsx": "^2.1.1",
     "csv-parse": "^7.0.2",
     "lucide-react": "^1.33.0",

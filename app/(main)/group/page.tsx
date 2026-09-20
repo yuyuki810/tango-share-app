@@ -21,6 +21,7 @@ import { NudgeButton } from "@/components/group/NudgeButton";
 import { NudgeBanner } from "@/components/group/NudgeBanner";
 import { ReminderSettingCard } from "@/components/group/ReminderSettingCard";
 import { RefreshButton } from "@/components/common/RefreshButton";
+import { GroupContributionBar } from "@/components/group/GroupContributionBar";
 
 interface ScoreEntryWithBonus extends DailyScoreEntryData {
   random_bonus_applied?: boolean;
@@ -94,6 +95,7 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
     weekScoresRes,
     sentNudgesRes,
     receivedNudgesRes,
+    allSessionsForWeekRes, // F-16: 共同ゲージ用 (解答数集計)
   ] = await Promise.all([
     supabase
       .from("test_sessions")
@@ -133,6 +135,12 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
       .select("sender_id")
       .eq("target_id", user.id)
       .eq("date", today),
+    supabase
+      .from("test_sessions")
+      .select("user_id, date, total_count")
+      .in("user_id", memberIds)
+      .in("date", weekDates)
+      .not("completed_at", "is", null),
   ]);
 
   const doneUserIds = new Set((todaySessionsRes.data ?? []).map((s) => s.user_id));
@@ -193,6 +201,30 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
     receivedSenderNames = (senderUsers ?? []).map((u) => u.name).filter(Boolean);
   }
 
+  // F-16 機能2: グループ共同ゲージ用の解答数集計 (今日分 / 今週分)
+  const allSessionRows = (allSessionsForWeekRes.data ?? []) as Array<{
+    user_id: string;
+    date: string;
+    total_count: number;
+  }>;
+
+  const dailyAnswersMap = new Map<string, number>();
+  const weeklyAnswersMap = new Map<string, number>();
+
+  allSessionRows.forEach((s) => {
+    const count = Number(s.total_count ?? 0);
+    weeklyAnswersMap.set(s.user_id, (weeklyAnswersMap.get(s.user_id) ?? 0) + count);
+    if (s.date === today) {
+      dailyAnswersMap.set(s.user_id, (dailyAnswersMap.get(s.user_id) ?? 0) + count);
+    }
+  });
+
+  const memberContributions = memberList.map((m) => ({
+    userId: m.id,
+    name: m.name,
+    answerCount: (currentTab === "weekly" ? weeklyAnswersMap.get(m.id) : dailyAnswersMap.get(m.id)) ?? 0,
+  }));
+
   return (
     <main className="mx-auto max-w-md md:max-w-xl lg:max-w-2xl w-full space-y-5 px-4 sm:px-0 pb-28 pt-6">
       <NudgeBanner senderNames={receivedSenderNames} />
@@ -225,7 +257,6 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
         <CopyButton text={group?.invite_code || ""} />
       </div>
 
-      {/* グループ自動リマインダー設定カード (誰でも変更可能) */}
       <ReminderSettingCard currentReminderTime={group?.reminder_time || null} />
 
       {/* 「今日」 / 「今週」 切替セグメントタブ */}
@@ -256,6 +287,12 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
           <span>今週 (週間ランキング)</span>
         </Link>
       </div>
+
+      {/* F-16 機能2: グループ共同ゲージ (今日 / 今週 連動) */}
+      <GroupContributionBar
+        contributions={memberContributions}
+        periodLabel={currentTab === "weekly" ? "今週" : "今日"}
+      />
 
       {currentTab === "daily" && (
         <div className="space-y-5 animate-in fade-in duration-150">
@@ -540,7 +577,7 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
 
                       <div className="flex items-center gap-1 mt-2">
                         <span className="font-maru text-[9px] text-ink/40 mr-0.5">進捗:</span>
-                        {m.dailyScores.map((ds) => (
+                        {m.dailyScores.map((ds, dIdx) => (
                           <span
                             key={ds.date}
                             className={`h-2 w-3.5 rounded-xs inline-block ${
@@ -559,7 +596,7 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
                   </div>
 
                   <div className="text-right shrink-0">
-                    <span className="font-maru text-[10px] md:text-xs font-medium text-ink/50 block">獲得スコア</span>
+                    <span className="font-maru text-[10px] md:text-xs font-medium text-ink/50 block">週間平均</span>
                     <div className="flex items-baseline justify-end gap-0.5">
                       <span className="font-mincho text-2xl md:text-3xl font-bold tracking-tight text-ink">
                         {m.weeklyScore}
