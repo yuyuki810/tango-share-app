@@ -172,7 +172,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                       {col.days.map((cell) => {
                         const chunk = cell.chunk;
 
-                        if (!chunk) {
+                        if (!chunk || (chunk.isReviewDay && chunk.totalAttempts === 0)) {
                           return (
                             <div
                               key={cell.date}
@@ -219,7 +219,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
 
                             <div>
                               <p className="font-mincho text-[10px] font-bold text-ink truncate">
-                                No.{chunk.rangeStart}〜{chunk.rangeEnd}
+                                {chunk.isReviewDay ? `総復習 (No.${chunk.rangeStart}〜${chunk.rangeEnd})` : `No.${chunk.rangeStart}〜${chunk.rangeEnd}`}
                               </p>
                               <div className="flex items-center justify-between mt-0.5">
                                 <span className="font-maru text-[9px] text-ink/40">

@@ -28,7 +28,7 @@ export interface ChunkStat {
   fullHistory: ChunkHistoryPoint[];
   drillHistory: ChunkHistoryPoint[];
   needsAttention: boolean;
-  mistakeWords: ChunkMistakeWord[];
+  mistakeWords: ChunkMistakeWord[];\n  isReviewDay?: boolean;
 }
 
 export async function computeChunkStats(
@@ -40,10 +40,9 @@ export async function computeChunkStats(
   const [assignRes, sessionsRes] = await Promise.all([
     supabase
       .from('daily_assignments')
-      .select('id, range_start, range_end, date')
+      .select('id, range_start, range_end, date, is_review_day')
       .eq('user_id', userId)
       .eq('wordbook_id', wordbookId)
-      .eq('is_review_day', false)
       .order('date', { ascending: true }),
     supabase
       .from('test_sessions')
@@ -113,8 +112,14 @@ export async function computeChunkStats(
       if (ans.origin_daily_assignment_id === assignment.id) {
         return true;
       }
-      const w = wordMap.get(ans.word_id);
-      return w && w.number >= assignment.range_start && w.number <= assignment.range_end;
+      if (assignment.is_review_day && ans.date === assignment.date) {
+        return true;
+      }
+      if (!assignment.is_review_day) {
+        const w = wordMap.get(ans.word_id);
+        return w && w.number >= assignment.range_start && w.number <= assignment.range_end;
+      }
+      return false;
     });
 
     const totalAttempts = chunkAnswers.length;
@@ -230,7 +235,7 @@ export async function computeChunkStats(
       fullHistory,
       drillHistory,
       needsAttention,
-      mistakeWords,
+      mistakeWords,\n      isReviewDay: assignment.is_review_day,
     };
   });
 }

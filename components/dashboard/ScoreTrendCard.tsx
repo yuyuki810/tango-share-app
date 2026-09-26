@@ -102,17 +102,27 @@ export function ScoreTrendCard({ scoreHistory }: ScoreTrendCardProps) {
                   />
                 )}
 
-                {points.map((p, i) => (
-                  <g key={i}>
-                    <circle cx={p.x} cy={p.y} r="4" fill="#378ADD" stroke="#FFFFFF" strokeWidth="2" />
-                    <text x={p.x} y={p.y - 7} textAnchor="middle" fill="#185FA5" className="text-[10px] font-bold font-mono">
-                      {p.score}
-                    </text>
-                    <text x={p.x} y={chartHeight + 1} textAnchor="middle" className="fill-ink/40 text-[9px] font-maru">
-                      {p.date}
-                    </text>
-                  </g>
-                ))}
+                {points.map((p, i) => {
+                  const isLast = i === points.length - 1;
+                  const isNearLast = (points.length - 1) - i === 1 && i % 5 === 0;
+                  const showLabel = isLast || (i % 5 === 0 && !isNearLast);
+
+                  return (
+                    <g key={i}>
+                      <circle cx={p.x} cy={p.y} r="4" fill="#378ADD" stroke="#FFFFFF" strokeWidth="2" />
+                      {showLabel && (
+                        <>
+                          <text x={p.x} y={p.y - 7} textAnchor="middle" fill="#185FA5" className="text-[10px] font-bold font-mono">
+                            {p.score}
+                          </text>
+                          <text x={p.x} y={chartHeight + 1} textAnchor="middle" className="fill-ink/40 text-[9px] font-maru">
+                            {p.date}
+                          </text>
+                        </>
+                      )}
+                    </g>
+                  );
+                })}
               </svg>
             </div>
           ) : (
