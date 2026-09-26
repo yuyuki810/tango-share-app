@@ -5,6 +5,7 @@ export interface WeeklyMemberRankingItem {
   weeklyScore: number;
   totalRawScore: number;
   daysAttended: number;
+  elapsedDays: number;
   avgAccuracyRate: number | null;
   dailyScores: Array<{ date: string; score: number; attended: boolean }>;
 }
@@ -22,8 +23,17 @@ export function computeWeeklyRanking(params: {
   members: Array<{ id: string; name: string; wordbooks?: any }>;
   weekDates: string[];
   scoreEntries: ScoreEntryRow[];
+  today?: string;
 }): WeeklyMemberRankingItem[] {
-  const { members, weekDates, scoreEntries } = params;
+  const { members, weekDates, scoreEntries, today } = params;
+
+  let elapsedDays = 7;
+  if (today) {
+    const todayIndex = weekDates.indexOf(today);
+    if (todayIndex !== -1) {
+      elapsedDays = Math.min(7, Math.max(1, todayIndex + 1));
+    }
+  }
 
   const entryMap = new Map<string, ScoreEntryRow>();
   for (const entry of scoreEntries) {
@@ -49,7 +59,7 @@ export function computeWeeklyRanking(params: {
       }
     });
 
-    const weeklyScore = Math.round(sumNormalized / 7);
+    const weeklyScore = Math.round(sumNormalized / elapsedDays);
     const totalRawScore = Math.round(sumRaw * 100) / 100;
     const avgAccuracyRate = attendedCount > 0
       ? Math.round((sumAccuracy / attendedCount) * 100)
@@ -64,6 +74,7 @@ export function computeWeeklyRanking(params: {
       weeklyScore,
       totalRawScore,
       daysAttended: attendedCount,
+      elapsedDays,
       avgAccuracyRate,
       dailyScores,
     };

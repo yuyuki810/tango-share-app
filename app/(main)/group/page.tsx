@@ -187,6 +187,7 @@ export default async function GroupPage({ searchParams }: GroupPageProps) {
     members: memberList,
     weekDates,
     scoreEntries: (weekScoresRes.data ?? []) as any,
+    today,
   });
 
   const sentNudgeTargetIds = new Set((sentNudgesRes.data ?? []).map((n) => n.target_id));

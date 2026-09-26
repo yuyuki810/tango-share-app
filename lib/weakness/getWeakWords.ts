@@ -30,7 +30,7 @@ export async function getWeakWords(
   options?: GetWeakWordsOptions
 ): Promise<WeakWordCard[]> {
   const filterMode = options?.filterMode || 'all';
-  const targetLimit = options?.limit || (filterMode === 'all' ? 50 : 10);
+  const targetLimit = options?.limit || (filterMode === 'all' ? 1000 : 10);
   const filterDays = options?.days;
   const targetChunkId = options?.chunkId;
 
