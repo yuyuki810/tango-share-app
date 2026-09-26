@@ -28,7 +28,8 @@ export interface ChunkStat {
   fullHistory: ChunkHistoryPoint[];
   drillHistory: ChunkHistoryPoint[];
   needsAttention: boolean;
-  mistakeWords: ChunkMistakeWord[];\n  isReviewDay?: boolean;
+  mistakeWords: ChunkMistakeWord[];
+  isReviewDay?: boolean;
 }
 
 export async function computeChunkStats(
@@ -36,7 +37,7 @@ export async function computeChunkStats(
   userId: string,
   wordbookId: string
 ): Promise<ChunkStat[]> {
-  // 1. 割当とセッション履歴を並列取得
+  // 1. 割当とセッション履歴を並列取得 (復習日も含めて全日取得)
   const [assignRes, sessionsRes] = await Promise.all([
     supabase
       .from('daily_assignments')
@@ -58,7 +59,7 @@ export async function computeChunkStats(
     return [];
   }
 
-  // 2. ユーザーの学習範囲に必要な単語のみに絞り込んで取得 (1900語全件取得を廃止して軽量化)
+  // 2. ユーザーの学習範囲に必要な単語のみに絞り込んで取得
   const minNum = Math.min(...assignments.map((a) => a.range_start));
   const maxNum = Math.max(...assignments.map((a) => a.range_end));
 
@@ -98,7 +99,7 @@ export async function computeChunkStats(
         word_id: a.word_id,
         session_id: s.id,
         session_type: s.type || 'normal',
-        is_retry: s.is_retry || false,
+        is_retry: !!s.is_retry,
         date: s.date,
         created_at: a.created_at || s.created_at,
       });
@@ -112,6 +113,7 @@ export async function computeChunkStats(
       if (ans.origin_daily_assignment_id === assignment.id) {
         return true;
       }
+      // 復習日のセッションはその日付の回答をマッチング
       if (assignment.is_review_day && ans.date === assignment.date) {
         return true;
       }
@@ -152,7 +154,7 @@ export async function computeChunkStats(
     const drillHistory: ChunkHistoryPoint[] = [];
 
     sortedSessions.forEach((s) => {
-      // 間違えた単語の即時復習テスト(is_retry=true)は、弱点マップの全体推移にもドリル推移にも含めない
+      // 間違えた単語の即時復習テスト(is_retry=true)は、弱点マップの推移から除外 (F-15不可侵)
       if (s.is_retry) {
         return;
       }
@@ -235,7 +237,8 @@ export async function computeChunkStats(
       fullHistory,
       drillHistory,
       needsAttention,
-      mistakeWords,\n      isReviewDay: assignment.is_review_day,
+      mistakeWords,
+      isReviewDay: assignment.is_review_day,
     };
   });
 }
