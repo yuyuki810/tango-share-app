@@ -74,6 +74,11 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
     }
   };
 
+  const currentWeekCol = gridData.find((c) => c.isCurrentWeek) || gridData[gridData.length - 1];
+  const activeBoundaryIdx = currentWeekCol?.days.findIndex(
+    (cell, i) => i > 0 && !currentWeekCol.days[i - 1]?.chunk?.isReviewDay && !!cell.chunk?.isReviewDay
+  ) ?? -1;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between px-1">
@@ -97,20 +102,22 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
 
       <div className="relative -mx-2 sm:mx-0 rounded-3xl border border-line bg-paper/60 p-2 sm:p-3 shadow-xs overflow-hidden">
         <div className="flex items-start">
-          {/* 左側固定の曜日ラベル列: 木曜日の前に同期した余白を配置 */}
+          {/* 左側固定の曜日ラベル列 */}
           <div className="sticky left-0 z-20 flex flex-col shrink-0 bg-paper/95 backdrop-blur-xs pr-1 pt-[68px] border-r border-line/60">
             {DAY_LABELS.map((dayLabel, idx) => {
-              const isBoundary = idx === 5;
+              const isBoundary = activeBoundaryIdx !== -1 && idx === activeBoundaryIdx;
+              const isReviewDayOfWeek = activeBoundaryIdx !== -1 && idx >= activeBoundaryIdx;
+
               return (
                 <React.Fragment key={dayLabel}>
                   {isBoundary && (
-                    <div className="h-4 my-1 flex items-center justify-center">
-                      <div className="w-full border-t border-dashed border-line/80" />
+                    <div className="h-3.5 my-1 flex items-center justify-center">
+                      <div className="w-full border-t border-dashed border-orange-400" />
                     </div>
                   )}
                   <div className={`flex h-[70px] w-5.5 items-center justify-center rounded-lg border font-maru text-[10px] font-bold mb-1.5 ${
-                    idx >= 5
-                      ? "bg-emerald-50/70 border-emerald-300 text-emerald-900"
+                    isReviewDayOfWeek
+                      ? "bg-orange-50/90 border-orange-400 text-orange-950 shadow-2xs"
                       : "bg-white/70 border-line/50 text-ink/60"
                   }`}>
                     {dayLabel}
@@ -120,7 +127,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
             })}
           </div>
 
-          {/* 横スクロール週カラム */}
+          {/* 横スクロール週カラム領域 */}
           <div
             ref={scrollContainerRef}
             className="flex-1 overflow-x-auto scroll-smooth pl-2 pr-3 pb-1"
@@ -128,6 +135,10 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
             <div className="flex gap-2.5 min-w-max">
               {gridData.map((col) => {
                 const isCurrent = col.isCurrentWeek;
+
+                const weekBoundaryIdx = col.days.findIndex(
+                  (cell, i) => i > 0 && !col.days[i - 1]?.chunk?.isReviewDay && !!cell.chunk?.isReviewDay
+                );
 
                 return (
                   <div
@@ -182,30 +193,35 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                       )}
                     </div>
 
-                    {/* 7日分のセル: 木曜の前に余白 & 復習日は緑の枠線 (border-2 border-emerald-500) */}
+                    {/* 7日分のセル (復習日はオレンジの枠線 border-2 border-orange-500) */}
                     <div className="pt-1.5">
                       {col.days.map((cell, idx) => {
                         const chunk = cell.chunk;
                         const isReviewDay = !!chunk?.isReviewDay;
-                        const isBoundary = idx === 5;
+
+                        const isBoundary =
+                          (weekBoundaryIdx !== -1 && idx === weekBoundaryIdx) ||
+                          (weekBoundaryIdx === -1 && activeBoundaryIdx !== -1 && idx === activeBoundaryIdx);
 
                         // 空セル
                         if (!chunk || (chunk.isReviewDay && chunk.totalAttempts === 0)) {
                           return (
                             <React.Fragment key={cell.date}>
                               {isBoundary && (
-                                <div className="h-4 my-1 flex items-center justify-center">
-                                  <div className="w-full border-t border-dashed border-line/80" />
+                                <div className="h-3.5 my-1 flex items-center justify-center">
+                                  <div className="w-full border-t border-dashed border-orange-400" />
                                 </div>
                               )}
                               <div
                                 className={`flex h-[70px] w-full items-center justify-center rounded-xl mb-1.5 font-mono text-xs ${
                                   isReviewDay
-                                    ? "border-2 border-dashed border-emerald-300/70 bg-emerald-50/20 text-emerald-800/40"
+                                    ? "border-2 border-dashed border-orange-300/80 bg-orange-50/25 text-orange-900/40"
                                     : "border border-dashed border-line/40 bg-line/10 text-ink/20"
                                 }`}
                               >
-                                {isReviewDay ? "復習日" : "—"}
+                                <span className="font-maru text-[9px] opacity-70">
+                                  {isReviewDay ? "復習日" : "—"}
+                                </span>
                               </div>
                             </React.Fragment>
                           );
@@ -214,29 +230,29 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                         const accuracy = chunk.accuracyRate;
                         const isAttention = chunk.needsAttention;
 
-                        // ★ 復習日は緑の線 (border-2 border-emerald-500) で囲む
+                        // ★ 復習日はオレンジの枠線 (border-2 border-orange-500) で囲む
                         let tileStyle = "border border-line bg-white hover:bg-paper";
                         let badgeStyle = "bg-emerald-50 text-emerald-800 border-emerald-200";
                         let badgeText = `${accuracy}%`;
 
                         if (isReviewDay) {
-                          tileStyle = "border-2 border-emerald-500 bg-emerald-50/30 hover:bg-emerald-50/50 shadow-2xs";
+                          tileStyle = "border-2 border-orange-500 bg-orange-50/35 hover:bg-orange-50/50 shadow-2xs";
                         }
 
                         if (chunk.totalAttempts === 0) {
                           tileStyle = isReviewDay
-                            ? "border-2 border-dashed border-emerald-400 bg-emerald-50/20 text-emerald-900/40"
+                            ? "border-2 border-dashed border-orange-400 bg-orange-50/25 text-orange-950/40"
                             : "border border-line/60 bg-paper/60 text-ink/40";
                           badgeStyle = "bg-line/30 text-ink/40 border-line/40";
                           badgeText = "未";
                         } else if (accuracy < 60) {
                           tileStyle = isReviewDay
-                            ? "border-2 border-emerald-600 bg-akashiito/10 shadow-2xs"
+                            ? "border-2 border-orange-600 bg-akashiito/10 shadow-2xs"
                             : "border border-akashiito-border bg-akashiito/10 shadow-2xs";
                           badgeStyle = "bg-akashiito text-white font-bold";
                         } else if (accuracy < 80) {
                           tileStyle = isReviewDay
-                            ? "border-2 border-emerald-500 bg-amber-50/40 shadow-2xs"
+                            ? "border-2 border-orange-500 bg-amber-50/40 shadow-2xs"
                             : "border border-amber-300 bg-amber-50/50";
                           badgeStyle = "bg-amber-100 text-amber-900 border-amber-300 font-bold";
                         }
@@ -244,8 +260,8 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                         return (
                           <React.Fragment key={chunk.chunkId}>
                             {isBoundary && (
-                              <div className="h-4 my-1 flex items-center justify-center">
-                                <div className="w-full border-t border-dashed border-line/80" />
+                              <div className="h-3.5 my-1 flex items-center justify-center">
+                                <div className="w-full border-t border-dashed border-orange-400" />
                               </div>
                             )}
                             <div
@@ -258,7 +274,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                                 </span>
                                 <div className="flex items-center gap-1">
                                   {isReviewDay && (
-                                    <span className="rounded-xs bg-emerald-100 border border-emerald-400 px-1 py-0.1 font-maru text-[8px] font-bold text-emerald-800">
+                                    <span className="rounded-xs bg-orange-100 border border-orange-400 px-1 py-0.1 font-maru text-[8px] font-bold text-orange-900">
                                       復習
                                     </span>
                                   )}
