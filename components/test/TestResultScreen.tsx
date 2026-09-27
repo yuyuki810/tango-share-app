@@ -1,17 +1,25 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import type { WordCardData } from '@/components/review/WordJudgeCard';
-import type { LearningPatternBadgeResult } from '@/lib/scoring/diagnoseLearningPattern';
-import { revalidateAfterTest } from '@/lib/actions/revalidateAfterTest';
-import { Info, X, Sparkles, RotateCcw } from 'lucide-react';
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import type { WordCardData } from "@/components/review/WordJudgeCard";
+import type { LearningPatternBadgeResult } from "@/lib/scoring/diagnoseLearningPattern";
+import { revalidateAfterTest } from "@/lib/actions/revalidateAfterTest";
+import { Info, X, Sparkles, RotateCcw, Award } from "lucide-react";
+
+interface PersonalBestsData {
+  isScoreBest: boolean;
+  previousScoreBest?: number | null;
+  newScore: number;
+  isStreakBest: boolean;
+  newStreak: number;
+}
 
 interface TestResultScreenProps {
   correctCount: number;
   totalCount: number;
   wrongCards: WordCardData[];
-  sessionType: 'daily_check' | 'normal';
+  sessionType: "daily_check" | "normal";
   saveStatus?: {
     isSaving: boolean;
     isSuccess: boolean;
@@ -29,6 +37,7 @@ interface TestResultScreenProps {
   } | null;
   learningPatternBadge?: LearningPatternBadgeResult | null;
   completedSessionId?: string | null;
+  personalBests?: PersonalBestsData | null;
 }
 
 export function TestResultScreen({
@@ -37,11 +46,12 @@ export function TestResultScreen({
   wrongCards,
   sessionType,
   saveStatus,
-  backUrl = '/dashboard',
-  backLabel = 'ダッシュボードへ戻る',
+  backUrl = "/dashboard",
+  backLabel = "ダッシュボードへ戻る",
   dailyScore,
   learningPatternBadge,
   completedSessionId,
+  personalBests,
 }: TestResultScreenProps) {
   const router = useRouter();
   const [showScoreInfo, setShowScoreInfo] = useState(false);
@@ -49,41 +59,57 @@ export function TestResultScreen({
 
   const accuracy = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
   const isPerfect = wrongCards.length === 0;
-  const isDailyCheck = sessionType === 'daily_check';
+  const isDailyCheck = sessionType === "daily_check";
 
   const handleLeave = (targetUrl: string) => {
     if (isLeaving) return;
     setIsLeaving(true);
-    revalidateAfterTest().catch((e) => console.error('Cache revalidation error on leave:', e));
+    revalidateAfterTest().catch((e) => console.error("Cache revalidation error on leave:", e));
     router.push(targetUrl);
   };
 
-  // F-15: 間違えた単語のみの即時復習テストを開始
   const handleRetryWrongWords = () => {
     if (isLeaving || !completedSessionId) return;
     setIsLeaving(true);
-    revalidateAfterTest().catch((e) => console.error('Cache revalidation error on retry:', e));
+    revalidateAfterTest().catch((e) => console.error("Cache revalidation error on retry:", e));
 
-    const fromParam = backUrl.includes('/weakness') ? 'weakness' : 'dashboard';
+    const fromParam = backUrl.includes("/weakness") ? "weakness" : "dashboard";
     const retryUrl = `/test?mode=normal&retrySessionId=${completedSessionId}&from=${fromParam}&t=${Date.now()}`;
     router.push(retryUrl);
   };
 
   return (
     <div className="flex min-h-[100dvh] flex-col justify-between p-6 bg-paper animate-in fade-in duration-200 select-none">
-      <div className="space-y-6">
+      <div className="space-y-5">
         <div className="text-center pt-4">
           <span className="inline-block rounded-full bg-highlighter/40 px-3 py-1 font-maru text-xs font-bold text-ink mb-2">
-            {isDailyCheck ? '本日の本番チェック完了 🎉' : '練習テスト完了 🎉'}
+            {isDailyCheck ? "本日の本番チェック完了 🎉" : "練習テスト完了 🎉"}
           </span>
           <h1 className="font-mincho text-2xl font-bold text-ink">
-            {isDailyCheck ? '本番チェック結果' : 'テスト結果'}
+            {isDailyCheck ? "本番チェック結果" : "テスト結果"}
           </h1>
           <p className="mt-1 font-maru text-xs text-ink/60">
-            {isPerfect ? '全問正解！素晴らしい集中力です' : '間違えた単語を振り返って定着させましょう'}
+            {isPerfect ? "全問正解！素晴らしい集中力です" : "間違えた単語を振り返って定着させましょう"}
           </p>
 
-          <div className="mt-5 rounded-3xl border border-line bg-white p-5 shadow-sm text-center space-y-4">
+          {personalBests && (personalBests.isScoreBest || personalBests.isStreakBest) && (
+            <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50/80 p-3.5 shadow-2xs space-y-1.5 text-left animate-in zoom-in-95 duration-200">
+              <div className="flex items-center gap-1.5 font-bold text-amber-900 font-mincho text-xs md:text-sm">
+                <Sparkles className="h-4 w-4 text-amber-600 fill-amber-500" />
+                <span>自己ベスト更新！おめでとうございます</span>
+              </div>
+              <div className="font-maru text-[11px] text-amber-900/80 space-y-0.5 pl-5">
+                {personalBests.isScoreBest && (
+                  <p>• 本番スコア: 過去最高 <strong>{personalBests.newScore}点</strong> を達成！ (前回ベスト: {personalBests.previousScoreBest ?? 0}点)</p>
+                )}
+                {personalBests.isStreakBest && (
+                  <p>• 継続日数: 過去最長 <strong>{personalBests.newStreak}日連続</strong> を更新！</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4 rounded-3xl border border-line bg-white p-5 shadow-sm text-center space-y-4">
             <div>
               <span className="font-maru text-xs text-ink/50 block">正答率</span>
               <div className="mt-1 flex items-baseline justify-center gap-1.5">
@@ -121,7 +147,7 @@ export function TestResultScreen({
                   <div className={`rounded-2xl border p-3.5 text-left transition ${learningPatternBadge.colorClass}`}>
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-1.5">
-                        <Sparkles className="h-3.5 w-3.5" />
+                        <Award className="h-3.5 w-3.5" />
                         <span className="font-maru text-xs font-bold">{learningPatternBadge.name}</span>
                       </div>
                       <span className="font-maru text-[10px] font-bold opacity-70">本日の学習診断</span>
@@ -145,7 +171,8 @@ export function TestResultScreen({
           </div>
         </div>
 
-        <div className="rounded-2xl border p-3.5 text-xs transition-all shadow-xs bg-white">
+        {/* データベース同期ステータス */}
+        <div className="rounded-2xl border p-3 text-xs transition-all shadow-xs bg-white">
           {saveStatus?.isSaving ? (
             <div className="flex items-center gap-2 text-ink/60 font-maru">
               <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-ink border-t-transparent" />
@@ -155,7 +182,7 @@ export function TestResultScreen({
             <div className="flex items-center justify-between text-ink font-maru">
               <span className="flex items-center gap-1.5 font-bold">
                 <span>🟢</span>
-                <span>{isDailyCheck ? '本番チェック記録完了' : '練習結果を記録完了'}</span>
+                <span>{isDailyCheck ? "本番チェック記録完了" : "練習結果を記録完了"}</span>
               </span>
               <span className="text-[11px] text-ink/50">
                 {saveStatus.savedCount ?? totalCount}件の回答を保存
@@ -165,20 +192,24 @@ export function TestResultScreen({
             <div className="space-y-1.5 text-akashiito font-maru">
               <div className="flex items-center gap-1.5 font-bold">
                 <span>🔴</span>
-                <span>{saveStatus?.errorMessage || '保存エラーが発生しました'}</span>
+                <span>{saveStatus?.errorMessage || "保存エラーが発生しました"}</span>
               </div>
               <p className="text-[11px] bg-akashiito/10 p-2 rounded-lg border border-akashiito/30 font-mono break-all">
-                {saveStatus?.detail || 'データベースに保存できませんでした'}
+                {saveStatus?.detail || "データベースに保存できませんでした"}
               </p>
             </div>
           )}
         </div>
 
-        <div className="space-y-2.5">
+        {/* 要復習の単語一覧 (要復習ラベル削除 & 左右横並び常時表示) */}
+        <div className="space-y-2">
           <div className="flex items-center justify-between px-1">
             <h2 className="font-mincho text-xs font-bold text-ink/60">
               要復習の単語 ({wrongCards.length}語)
             </h2>
+            <span className="font-maru text-[10px] text-ink/40">
+              右側(意味)を隠して自己テストできます
+            </span>
           </div>
 
           {isPerfect ? (
@@ -187,24 +218,27 @@ export function TestResultScreen({
               <p className="mt-1 font-maru text-xs text-ink/40">この調子で毎日の学習を積み重ねましょう！</p>
             </div>
           ) : (
-            <div className="max-h-[250px] space-y-2 overflow-y-auto pr-0.5">
+            <div className="max-h-[260px] space-y-2 overflow-y-auto pr-0.5">
               {wrongCards.map((card) => (
                 <div
                   key={card.wordId}
-                  className="flex items-center justify-between rounded-xl border border-line bg-white p-3.5 shadow-xs"
+                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-white p-3.5 shadow-xs transition hover:border-ink/30"
                 >
-                  <div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-mincho text-base font-bold text-ink">{card.headword}</span>
-                      {card.pronunciation && (
-                        <span className="font-maru text-xs text-ink/40">{card.pronunciation}</span>
-                      )}
-                    </div>
-                    <p className="mt-0.5 font-maru text-xs text-ink/70">{card.meaning}</p>
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="font-mincho text-base font-bold text-ink truncate">
+                      {card.headword}
+                    </span>
+                    {card.pronunciation && (
+                      <span className="font-maru text-xs text-ink/40 shrink-0">
+                        /{card.pronunciation}/
+                      </span>
+                    )}
                   </div>
-                  <span className="shrink-0 rounded-full border border-akashiito-border bg-akashiito/10 px-2.5 py-0.5 font-maru text-[10px] font-bold text-akashiito">
-                    要復習
-                  </span>
+                  <div className="text-right shrink-0 max-w-[55%]">
+                    <span className="font-maru text-xs md:text-sm font-medium text-ink/80 leading-snug">
+                      {card.meaning}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -212,8 +246,7 @@ export function TestResultScreen({
         </div>
       </div>
 
-      <div className="pt-6 pb-2 space-y-2.5">
-        {/* F-15: 間違えた単語を復習するボタン (1件以上間違いがある場合のみ表示) */}
+      <div className="pt-5 pb-2 space-y-2.5">
         {!isPerfect && completedSessionId && (
           <button
             type="button"
@@ -232,13 +265,13 @@ export function TestResultScreen({
           disabled={isLeaving}
           className="flex min-h-[52px] w-full items-center justify-center rounded-2xl bg-ink font-mincho text-base font-bold text-paper shadow-md transition active:scale-[0.98] hover:bg-ink/90 cursor-pointer disabled:opacity-70"
         >
-          {isLeaving ? '移動中…' : backLabel}
+          {isLeaving ? "移動中…" : backLabel}
         </button>
 
         {isDailyCheck && (
           <button
             type="button"
-            onClick={() => handleLeave('/group')}
+            onClick={() => handleLeave("/group")}
             disabled={isLeaving}
             className="flex min-h-[44px] w-full items-center justify-center rounded-2xl border border-line bg-white font-maru text-xs font-bold text-ink transition hover:bg-paper-hover active:scale-[0.98] cursor-pointer disabled:opacity-70"
           >
