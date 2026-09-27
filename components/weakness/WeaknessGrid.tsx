@@ -112,12 +112,12 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                 <React.Fragment key={dayLabel}>
                   {isBoundary && (
                     <div className="h-3.5 my-1 flex items-center justify-center">
-                      <div className="w-full border-t border-dashed border-orange-400" />
+                      <div className="w-full border-t border-dashed border-orange-300/80" />
                     </div>
                   )}
                   <div className={`flex h-[70px] w-5.5 items-center justify-center rounded-lg border font-maru text-[10px] font-bold mb-1.5 ${
                     isReviewDayOfWeek
-                      ? "bg-orange-50/90 border-orange-400 text-orange-950 shadow-2xs"
+                      ? "bg-orange-50/70 border-orange-300/80 text-orange-950/80"
                       : "bg-white/70 border-line/50 text-ink/60"
                   }`}>
                     {dayLabel}
@@ -193,7 +193,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                       )}
                     </div>
 
-                    {/* 7日分のセル (復習日はオレンジの枠線 border-2 border-orange-500) */}
+                    {/* 7日分のセル (復習日は上品な細枠・薄いオレンジ border border-orange-300) */}
                     <div className="pt-1.5">
                       {col.days.map((cell, idx) => {
                         const chunk = cell.chunk;
@@ -209,13 +209,13 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                             <React.Fragment key={cell.date}>
                               {isBoundary && (
                                 <div className="h-3.5 my-1 flex items-center justify-center">
-                                  <div className="w-full border-t border-dashed border-orange-400" />
+                                  <div className="w-full border-t border-dashed border-orange-300/80" />
                                 </div>
                               )}
                               <div
                                 className={`flex h-[70px] w-full items-center justify-center rounded-xl mb-1.5 font-mono text-xs ${
                                   isReviewDay
-                                    ? "border-2 border-dashed border-orange-300/80 bg-orange-50/25 text-orange-900/40"
+                                    ? "border border-dashed border-orange-200/90 bg-orange-50/15 text-orange-900/35"
                                     : "border border-dashed border-line/40 bg-line/10 text-ink/20"
                                 }`}
                               >
@@ -230,29 +230,29 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                         const accuracy = chunk.accuracyRate;
                         const isAttention = chunk.needsAttention;
 
-                        // ★ 復習日はオレンジの枠線 (border-2 border-orange-500) で囲む
+                        // 復習日は細い1pxの上品な薄いオレンジ枠線 (border border-orange-300)
                         let tileStyle = "border border-line bg-white hover:bg-paper";
                         let badgeStyle = "bg-emerald-50 text-emerald-800 border-emerald-200";
                         let badgeText = `${accuracy}%`;
 
                         if (isReviewDay) {
-                          tileStyle = "border-2 border-orange-500 bg-orange-50/35 hover:bg-orange-50/50 shadow-2xs";
+                          tileStyle = "border border-orange-300 bg-orange-50/20 hover:bg-orange-50/40 shadow-2xs";
                         }
 
                         if (chunk.totalAttempts === 0) {
                           tileStyle = isReviewDay
-                            ? "border-2 border-dashed border-orange-400 bg-orange-50/25 text-orange-950/40"
+                            ? "border border-dashed border-orange-300/80 bg-orange-50/15 text-orange-950/40"
                             : "border border-line/60 bg-paper/60 text-ink/40";
                           badgeStyle = "bg-line/30 text-ink/40 border-line/40";
                           badgeText = "未";
                         } else if (accuracy < 60) {
                           tileStyle = isReviewDay
-                            ? "border-2 border-orange-600 bg-akashiito/10 shadow-2xs"
+                            ? "border border-orange-400 bg-akashiito/10 shadow-2xs ring-1 ring-akashiito/20"
                             : "border border-akashiito-border bg-akashiito/10 shadow-2xs";
                           badgeStyle = "bg-akashiito text-white font-bold";
                         } else if (accuracy < 80) {
                           tileStyle = isReviewDay
-                            ? "border-2 border-orange-500 bg-amber-50/40 shadow-2xs"
+                            ? "border border-orange-300 bg-amber-50/40 shadow-2xs"
                             : "border border-amber-300 bg-amber-50/50";
                           badgeStyle = "bg-amber-100 text-amber-900 border-amber-300 font-bold";
                         }
@@ -261,7 +261,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                           <React.Fragment key={chunk.chunkId}>
                             {isBoundary && (
                               <div className="h-3.5 my-1 flex items-center justify-center">
-                                <div className="w-full border-t border-dashed border-orange-400" />
+                                <div className="w-full border-t border-dashed border-orange-300/80" />
                               </div>
                             )}
                             <div
@@ -274,7 +274,7 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                                 </span>
                                 <div className="flex items-center gap-1">
                                   {isReviewDay && (
-                                    <span className="rounded-xs bg-orange-100 border border-orange-400 px-1 py-0.1 font-maru text-[8px] font-bold text-orange-900">
+                                    <span className="rounded-xs bg-orange-50 border border-orange-300 text-orange-900/90 px-1 py-0.1 font-maru text-[8px] font-bold">
                                       復習
                                     </span>
                                   )}
