@@ -3,7 +3,7 @@
 import React, { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ChunkStat, ChunkHistoryPoint } from '@/lib/weakness/computeChunkStats';
 import { DrillFilterDialog } from './DrillFilterDialog';
-import { SlidersHorizontal } from 'lucide-react';
+import { SlidersHorizontal, BarChart3 } from 'lucide-react';
 
 interface WeaknessBottomSheetProps {
   chunk: ChunkStat | null;
@@ -50,7 +50,7 @@ function AccuracyLineChart({
       points.length === 1
         ? chartWidth / 2
         : paddingX + (i / (points.length - 1)) * (chartWidth - paddingX * 2);
-    
+
     const y = chartHeight - paddingY - (h.accuracyRate / 100) * (chartHeight - paddingY * 2);
 
     const baseDate = formatDateLabel(h.testDate);
@@ -81,32 +81,9 @@ function AccuracyLineChart({
   return (
     <div className="py-1">
       <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-20 w-full overflow-visible">
-        <line
-          x1={paddingX}
-          y1={paddingY}
-          x2={chartWidth - paddingX}
-          y2={paddingY}
-          stroke="#EBE8DF"
-          strokeWidth="1"
-          strokeDasharray="3,3"
-        />
-        <line
-          x1={paddingX}
-          y1={chartHeight / 2}
-          x2={chartWidth - paddingX}
-          y2={chartHeight / 2}
-          stroke="#EBE8DF"
-          strokeWidth="1"
-          strokeDasharray="3,3"
-        />
-        <line
-          x1={paddingX}
-          y1={chartHeight - paddingY}
-          x2={chartWidth - paddingX}
-          y2={chartHeight - paddingY}
-          stroke="#EBE8DF"
-          strokeWidth="1"
-        />
+        <line x1={paddingX} y1={paddingY} x2={chartWidth - paddingX} y2={paddingY} stroke="#EBE8DF" strokeWidth="1" strokeDasharray="3,3" />
+        <line x1={paddingX} y1={chartHeight / 2} x2={chartWidth - paddingX} y2={chartHeight / 2} stroke="#EBE8DF" strokeWidth="1" strokeDasharray="3,3" />
+        <line x1={paddingX} y1={chartHeight - paddingY} x2={chartWidth - paddingX} y2={chartHeight - paddingY} stroke="#EBE8DF" strokeWidth="1" />
 
         {pathD && (
           <path
@@ -160,6 +137,7 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
 
   const hasAttempts = chunk.totalAttempts > 0;
   const accuracy = chunk.accuracyRate;
+  const isReviewDay = !!chunk.isReviewDay;
 
   return (
     <>
@@ -172,7 +150,6 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
           style={{ transform: `translateY(${dragY}px)` }}
           className="max-h-[88vh] w-full max-w-md md:max-w-xl overflow-y-auto rounded-t-3xl bg-paper shadow-2xl transition-transform duration-200 motion-reduce:transition-none"
         >
-          {/* ドラッグハンドル & ヘッダー */}
           <div
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -183,10 +160,10 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
             <div className="mt-2 flex w-full items-center justify-between">
               <div className="flex items-center gap-2">
                 <h2 className="font-mincho text-lg font-bold text-ink">
-                  No.{chunk.rangeStart}〜{chunk.rangeEnd}
+                  {isReviewDay ? `総復習 (No.${chunk.rangeStart}〜${chunk.rangeEnd})` : `No.${chunk.rangeStart}〜${chunk.rangeEnd}`}
                 </h2>
                 <span className="font-maru text-xs text-ink/50">
-                  ({formatDateLabel(chunk.originDate)} 学習)
+                  ({formatDateLabel(chunk.originDate)} {isReviewDay ? '復習日' : '学習'})
                 </span>
               </div>
               <button
@@ -201,7 +178,6 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
           </div>
 
           <div className="space-y-5 p-4 pb-6">
-            {/* サマリー統計 */}
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-2xl border border-line bg-white p-3.5 shadow-xs">
                 <span className="block font-maru text-[11px] text-ink/50">現在の全体正答率</span>
@@ -217,7 +193,7 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
                 </div>
               </div>
               <div className="rounded-2xl border border-line bg-white p-3.5 shadow-xs">
-                <span className="block font-maru text-[11px] text-ink/50">受験回数</span>
+                <span className="block font-maru text-[11px] text-ink/50">受験実績</span>
                 <p className="mt-1 font-mincho text-sm font-bold text-ink leading-snug">
                   全体: <span className="text-base font-number">{chunk.fullHistory.length}</span>回<br />
                   苦手特訓: <span className="text-base font-number">{chunk.drillHistory.length}</span>回
@@ -225,47 +201,97 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
               </div>
             </div>
 
-            {/* グラフ1: 範囲全体テスト (緑 #639922) */}
-            <div className="rounded-2xl border border-line bg-white p-4 shadow-xs space-y-1">
-              <div className="flex items-center justify-between">
-                <div>
+            {/* 復習日は進める日別の定着バー(横棒グラフ)を表示 */}
+            {isReviewDay ? (
+              <div className="rounded-2xl border border-line bg-white p-4 shadow-xs space-y-3">
+                <div className="flex items-center justify-between border-b border-line/60 pb-2">
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-block h-2 w-2 rounded-full bg-[#639922]" />
-                    <span className="font-mincho text-xs font-bold text-ink">1. 全体正答率の推移</span>
+                    <BarChart3 className="h-4 w-4 text-[#136C56]" />
+                    <span className="font-mincho text-xs font-bold text-ink">範囲ごとの定着状況 (進める日別)</span>
                   </div>
-                  <p className="font-maru text-[10px] text-ink/50 mt-0.5">※出題範囲全体の習熟度推移 ({chunk.fullHistory.length}回)</p>
+                  <span className="font-maru text-[10px] text-ink/40">復習テスト内訳</span>
                 </div>
-                <span className="font-maru text-[10px] text-ink/40">古い順 → 最新</span>
-              </div>
 
-              <AccuracyLineChart
-                points={chunk.fullHistory}
-                color="#639922"
-                emptyMessage="まだ範囲全体のテスト履歴がありません"
-              />
-            </div>
+                {chunk.reviewBreakdown && chunk.reviewBreakdown.length > 0 ? (
+                  <div className="space-y-3 pt-1">
+                    {chunk.reviewBreakdown.map((b) => {
+                      const barColor =
+                        b.accuracyRate >= 80
+                          ? 'bg-emerald-500'
+                          : b.accuracyRate >= 60
+                          ? 'bg-amber-500'
+                          : 'bg-akashiito';
 
-            {/* グラフ2: 苦手克服テスト (紫 #7F77DD) */}
-            <div className="rounded-2xl border border-line bg-white p-4 shadow-xs space-y-1">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-block h-2 w-2 rounded-full bg-[#7F77DD]" />
-                    <span className="font-mincho text-xs font-bold text-ink">2. 苦手克服テストの正答率</span>
+                      return (
+                        <div key={b.originAssignmentId} className="space-y-1">
+                          <div className="flex items-center justify-between font-maru text-xs">
+                            <span className="font-bold text-ink flex items-center gap-1.5">
+                              <span className="text-ink/50 font-mono text-[11px]">{formatDateLabel(b.originDate)}</span>
+                              <span>No.{b.rangeStart}〜{b.rangeEnd}</span>
+                            </span>
+                            <span className="font-mono text-xs font-bold text-ink">
+                              {b.accuracyRate}% <span className="font-maru text-[10px] text-ink/40 font-normal">({b.correctCount}/{b.totalCount}語)</span>
+                            </span>
+                          </div>
+
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-line/30">
+                            <div
+                              style={{ width: `${b.accuracyRate}%` }}
+                              className={`h-full rounded-full transition-all duration-300 ${barColor}`}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <p className="font-maru text-[10px] text-ink/50 mt-0.5">※母数: 過去に間違えた単語のみ ({chunk.drillHistory.length}回)</p>
-                </div>
-                <span className="font-maru text-[10px] text-ink/40">古い順 → 最新</span>
+                ) : (
+                  <p className="py-4 text-center font-maru text-xs text-ink/40">
+                    まだ復習テストの受検実績がありません
+                  </p>
+                )}
               </div>
+            ) : (
+              <>
+                <div className="rounded-2xl border border-line bg-white p-4 shadow-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-block h-2 w-2 rounded-full bg-[#639922]" />
+                        <span className="font-mincho text-xs font-bold text-ink">1. 全体正答率の推移</span>
+                      </div>
+                      <p className="font-maru text-[10px] text-ink/50 mt-0.5">※出題範囲全体の習熟度推移 ({chunk.fullHistory.length}回)</p>
+                    </div>
+                    <span className="font-maru text-[10px] text-ink/40">古い順 → 最新</span>
+                  </div>
 
-              <AccuracyLineChart
-                points={chunk.drillHistory}
-                color="#7F77DD"
-                emptyMessage="苦手克服テストの履歴はまだありません。下のボタンから特訓できます。"
-              />
-            </div>
+                  <AccuracyLineChart
+                    points={chunk.fullHistory}
+                    color="#639922"
+                    emptyMessage="まだ範囲全体のテスト履歴がありません"
+                  />
+                </div>
 
-            {/* 間違えた単語一覧 */}
+                <div className="rounded-2xl border border-line bg-white p-4 shadow-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-block h-2 w-2 rounded-full bg-[#7F77DD]" />
+                        <span className="font-mincho text-xs font-bold text-ink">2. 苦手克服テストの正答率</span>
+                      </div>
+                      <p className="font-maru text-[10px] text-ink/50 mt-0.5">※母数: 過去に間違えた単語のみ ({chunk.drillHistory.length}回)</p>
+                    </div>
+                    <span className="font-maru text-[10px] text-ink/40">古い順 → 最新</span>
+                  </div>
+
+                  <AccuracyLineChart
+                    points={chunk.drillHistory}
+                    color="#7F77DD"
+                    emptyMessage="苦手克服テストの履歴はまだありません。下のボタンから特訓できます。"
+                  />
+                </div>
+              </>
+            )}
+
             <div className="space-y-2">
               <div className="flex items-center justify-between px-1">
                 <span className="font-mincho text-xs font-bold text-ink/70">
@@ -304,7 +330,6 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
             </div>
           </div>
 
-          {/* 下部アクションボタン */}
           <div className="sticky bottom-0 border-t border-line/80 bg-paper/95 p-4 backdrop-blur-xs">
             <button
               type="button"
@@ -321,7 +346,7 @@ export function WeaknessBottomSheet({ chunk, onClose }: WeaknessBottomSheetProps
       <DrillFilterDialog
         isOpen={isDrillDialogOpen}
         onClose={() => setIsDrillDialogOpen(false)}
-        title={`No.${chunk.rangeStart}〜${chunk.rangeEnd} の苦手克服`}
+        title={isReviewDay ? `総復習 (No.${chunk.rangeStart}〜${chunk.rangeEnd}) の苦手克服` : `No.${chunk.rangeStart}〜${chunk.rangeEnd} の苦手克服`}
         originAssignmentId={chunk.chunkId}
       />
     </>

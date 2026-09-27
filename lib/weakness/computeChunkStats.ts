@@ -17,6 +17,16 @@ export interface ChunkHistoryPoint {
   totalCount: number;
 }
 
+export interface ReviewChunkBreakdown {
+  originAssignmentId: string;
+  originDate: string;
+  rangeStart: number;
+  rangeEnd: number;
+  correctCount: number;
+  totalCount: number;
+  accuracyRate: number;
+}
+
 export interface ChunkStat {
   chunkId: string;
   rangeStart: number;
@@ -30,6 +40,7 @@ export interface ChunkStat {
   needsAttention: boolean;
   mistakeWords: ChunkMistakeWord[];
   isReviewDay?: boolean;
+  reviewBreakdown?: ReviewChunkBreakdown[];
 }
 
 export async function computeChunkStats(
@@ -37,7 +48,6 @@ export async function computeChunkStats(
   userId: string,
   wordbookId: string
 ): Promise<ChunkStat[]> {
-  // 1. 割当とセッション履歴を並列取得 (復習日も含めて全日取得)
   const [assignRes, sessionsRes] = await Promise.all([
     supabase
       .from('daily_assignments')
@@ -59,7 +69,6 @@ export async function computeChunkStats(
     return [];
   }
 
-  // 2. ユーザーの学習範囲に必要な単語のみに絞り込んで取得
   const minNum = Math.min(...assignments.map((a) => a.range_start));
   const maxNum = Math.max(...assignments.map((a) => a.range_end));
 
@@ -76,7 +85,6 @@ export async function computeChunkStats(
     wordMap.set(w.id, w);
   });
 
-  // 全回答フラット化
   const allAnswers: Array<{
     id: string;
     is_known: boolean;
@@ -106,6 +114,8 @@ export async function computeChunkStats(
     });
   });
 
+  const normalAssignments = assignments.filter((a) => !a.is_review_day);
+
   return assignments.map((assignment) => {
     const chunkWordCount = assignment.range_end - assignment.range_start + 1;
 
@@ -113,7 +123,6 @@ export async function computeChunkStats(
       if (ans.origin_daily_assignment_id === assignment.id) {
         return true;
       }
-      // 復習日のセッションはその日付の回答をマッチング
       if (assignment.is_review_day && ans.date === assignment.date) {
         return true;
       }
@@ -126,6 +135,36 @@ export async function computeChunkStats(
 
     const totalAttempts = chunkAnswers.length;
     const correctCount = chunkAnswers.filter((a) => a.is_known).length;
+
+    // 復習日の各進める日別内訳を集計
+    let reviewBreakdown: ReviewChunkBreakdown[] | undefined;
+    if (assignment.is_review_day) {
+      const priorNormals = normalAssignments.filter(
+        (na) => na.date <= assignment.date && na.range_start >= assignment.range_start && na.range_end <= assignment.range_end
+      );
+
+      reviewBreakdown = priorNormals.map((na) => {
+        const naAnswers = chunkAnswers.filter((ans) => {
+          if (ans.origin_daily_assignment_id === na.id) return true;
+          const w = wordMap.get(ans.word_id);
+          return w && w.number >= na.range_start && w.number <= na.range_end;
+        });
+
+        const naTotal = naAnswers.length;
+        const naCorrect = naAnswers.filter((a) => a.is_known).length;
+        const naAcc = naTotal > 0 ? Math.round((naCorrect / naTotal) * 100) : 0;
+
+        return {
+          originAssignmentId: na.id,
+          originDate: na.date,
+          rangeStart: na.range_start,
+          rangeEnd: na.range_end,
+          correctCount: naCorrect,
+          totalCount: naTotal,
+          accuracyRate: naAcc,
+        };
+      });
+    }
 
     const sessionMap = new Map<
       string,
@@ -154,7 +193,6 @@ export async function computeChunkStats(
     const drillHistory: ChunkHistoryPoint[] = [];
 
     sortedSessions.forEach((s) => {
-      // 間違えた単語の即時復習テスト(is_retry=true)は、弱点マップの推移から除外 (F-15不可侵)
       if (s.is_retry) {
         return;
       }
@@ -239,6 +277,7 @@ export async function computeChunkStats(
       needsAttention,
       mistakeWords,
       isReviewDay: assignment.is_review_day,
+      reviewBreakdown,
     };
   });
 }

@@ -97,15 +97,19 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
 
       <div className="relative -mx-2 sm:mx-0 rounded-3xl border border-line bg-paper/60 p-2 sm:p-3 shadow-xs overflow-hidden">
         <div className="flex items-start">
-          <div className="sticky left-0 z-20 flex flex-col shrink-0 bg-paper/95 backdrop-blur-xs pr-1 pt-[68px] space-y-1.5 border-r border-line/60">
-            {DAY_LABELS.map((dayLabel) => (
-              <div
-                key={dayLabel}
-                className="flex h-[70px] w-5.5 items-center justify-center rounded-lg bg-white/70 border border-line/50 font-maru text-[10px] font-bold text-ink/60"
-              >
-                {dayLabel}
-              </div>
-            ))}
+          {/* 左側固定の曜日ラベル列: 復習日の前に余白を設けて完全同期 */}
+          <div className="sticky left-0 z-20 flex flex-col shrink-0 bg-paper/95 backdrop-blur-xs pr-1 pt-[68px] border-r border-line/60">
+            {DAY_LABELS.map((dayLabel, idx) => {
+              const isBoundary = idx === 5; // 木曜(復習日)の前に区切り余白
+              return (
+                <React.Fragment key={dayLabel}>
+                  {isBoundary && <div className="h-2 w-full" />}
+                  <div className="flex h-[70px] w-5.5 items-center justify-center rounded-lg bg-white/70 border border-line/50 font-maru text-[10px] font-bold text-ink/60 mb-1.5">
+                    {dayLabel}
+                  </div>
+                </React.Fragment>
+              );
+            })}
           </div>
 
           <div
@@ -168,18 +172,26 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                       )}
                     </div>
 
-                    <div className="space-y-1.5 pt-1.5">
-                      {col.days.map((cell) => {
+                    <div className="pt-1.5">
+                      {col.days.map((cell, idx) => {
                         const chunk = cell.chunk;
+                        const isReviewDay = !!chunk?.isReviewDay;
+                        const isBoundary = idx === 5;
 
                         if (!chunk || (chunk.isReviewDay && chunk.totalAttempts === 0)) {
                           return (
-                            <div
-                              key={cell.date}
-                              className="flex h-[70px] w-full items-center justify-center rounded-xl border border-dashed border-line/40 bg-line/10 text-ink/20 font-mono text-xs"
-                            >
-                              —
-                            </div>
+                            <React.Fragment key={cell.date}>
+                              {isBoundary && <div className="h-2 w-full" />}
+                              <div
+                                className={`flex h-[70px] w-full items-center justify-center rounded-xl border border-dashed mb-1.5 font-mono text-xs ${
+                                  isReviewDay
+                                    ? 'border-amber-200/60 bg-amber-50/20 text-amber-900/25'
+                                    : 'border-line/40 bg-line/10 text-ink/20'
+                                }`}
+                              >
+                                —
+                              </div>
+                            </React.Fragment>
                           );
                         }
 
@@ -190,51 +202,68 @@ export function WeaknessGrid({ chunks, todayJst, onSelectChunk }: WeaknessGridPr
                         let badgeStyle = 'bg-emerald-50 text-emerald-800 border-emerald-200';
                         let badgeText = `${accuracy}%`;
 
+                        if (isReviewDay) {
+                          tileStyle = 'border-amber-300/80 bg-amber-100/35 hover:bg-amber-100/50 shadow-2xs';
+                        }
+
                         if (chunk.totalAttempts === 0) {
                           tileStyle = 'border-line/60 bg-paper/60 text-ink/40';
                           badgeStyle = 'bg-line/30 text-ink/40 border-line/40';
                           badgeText = '未';
                         } else if (accuracy < 60) {
-                          tileStyle = 'border-akashiito-border bg-akashiito/10 shadow-2xs';
+                          tileStyle = isReviewDay
+                            ? 'border-akashiito-border bg-akashiito/15 shadow-2xs'
+                            : 'border-akashiito-border bg-akashiito/10 shadow-2xs';
                           badgeStyle = 'bg-akashiito text-white font-bold';
                         } else if (accuracy < 80) {
-                          tileStyle = 'border-amber-300 bg-amber-50/50';
-                          badgeStyle = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
+                          tileStyle = isReviewDay
+                            ? 'border-amber-400 bg-amber-100/60 shadow-2xs'
+                            : 'border-amber-300 bg-amber-50/50';
+                          badgeStyle = 'bg-amber-200 text-amber-950 border-amber-300 font-bold';
                         }
 
                         return (
-                          <div
-                            key={chunk.chunkId}
-                            onClick={() => onSelectChunk(chunk)}
-                            className={`flex h-[70px] w-full flex-col justify-between rounded-xl border p-1.5 text-left transition cursor-pointer active:scale-95 shadow-2xs ${tileStyle}`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono text-[9px] text-ink/50 font-bold">
-                                {formatDateShort(cell.date)}
-                              </span>
-                              <span className={`rounded-full border px-1.5 py-0.2 font-number text-[9px] ${badgeStyle}`}>
-                                {badgeText}
-                              </span>
-                            </div>
-
-                            <div>
-                              <p className="font-mincho text-[10px] font-bold text-ink truncate">
-                                {chunk.isReviewDay ? `総復習 (No.${chunk.rangeStart}〜${chunk.rangeEnd})` : `No.${chunk.rangeStart}〜${chunk.rangeEnd}`}
-                              </p>
-                              <div className="flex items-center justify-between mt-0.5">
-                                <span className="font-maru text-[9px] text-ink/40">
-                                  {chunk.mistakeWords.length > 0
-                                    ? `苦手 ${chunk.mistakeWords.length}語`
-                                    : 'ミスなし'}
+                          <React.Fragment key={chunk.chunkId}>
+                            {isBoundary && <div className="h-2 w-full" />}
+                            <div
+                              onClick={() => onSelectChunk(chunk)}
+                              className={`flex h-[70px] w-full flex-col justify-between rounded-xl border p-1.5 text-left transition cursor-pointer active:scale-95 shadow-2xs mb-1.5 ${tileStyle}`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono text-[9px] text-ink/50 font-bold">
+                                  {formatDateShort(cell.date)}
                                 </span>
-                                {isAttention && (
-                                  <span className="rounded-full bg-akashiito/15 text-akashiito text-[8px] font-bold px-1">
-                                    注意
+                                <div className="flex items-center gap-1">
+                                  {isReviewDay && (
+                                    <span className="rounded-xs bg-amber-200/80 border border-amber-300 px-1 py-0.1 font-maru text-[8px] font-bold text-amber-900">
+                                      復習
+                                    </span>
+                                  )}
+                                  <span className={`rounded-full border px-1.5 py-0.2 font-number text-[9px] ${badgeStyle}`}>
+                                    {badgeText}
                                   </span>
-                                )}
+                                </div>
+                              </div>
+
+                              <div>
+                                <p className="font-mincho text-[10px] font-bold text-ink truncate">
+                                  {isReviewDay ? `総復習 (No.${chunk.rangeStart}〜${chunk.rangeEnd})` : `No.${chunk.rangeStart}〜${chunk.rangeEnd}`}
+                                </p>
+                                <div className="flex items-center justify-between mt-0.5">
+                                  <span className="font-maru text-[9px] text-ink/40">
+                                    {chunk.mistakeWords.length > 0
+                                      ? `苦手 ${chunk.mistakeWords.length}語`
+                                      : 'ミスなし'}
+                                  </span>
+                                  {isAttention && (
+                                    <span className="rounded-full bg-akashiito/15 text-akashiito text-[8px] font-bold px-1">
+                                      注意
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          </React.Fragment>
                         );
                       })}
                     </div>
