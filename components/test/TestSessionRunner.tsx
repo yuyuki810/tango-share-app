@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { WordJudgeCardScreen } from "@/components/review/WordJudgeCardScreen";
 import type { WordCardData } from "@/components/review/WordJudgeCard";
 import { ChunkSummaryScreen, type ChunkResultItem } from "@/components/weakness/ChunkSummaryScreen";
 import { TestResultScreen } from "@/components/test/TestResultScreen";
 import type { ReviewChunkSummaryInfo } from "@/lib/test/getTodayTestWords";
 import type { LearningPatternBadgeResult } from "@/lib/scoring/diagnoseLearningPattern";
-import { RefreshCw, Play, RotateCcw, Shuffle, Layers, Info } from "lucide-react";
+import { RefreshCw, Play, RotateCcw, Shuffle, Layers, Info, CheckCircle2, AlertTriangle } from "lucide-react";
 
 function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];
@@ -49,6 +50,7 @@ export function TestSessionRunner({
   initialForceNew = false,
   isRetry = false,
 }: TestSessionRunnerProps) {
+  const router = useRouter();
   const [cards, setCards] = useState<WordCardData[]>(() =>
     isRandomOrder ? shuffleArray(initialCards) : initialCards
   );
@@ -56,6 +58,7 @@ export function TestSessionRunner({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [initError, setInitError] = useState<{ code?: string; message: string } | null>(null);
   const [resumePrompt, setResumePrompt] = useState<ResumeState | null>(null);
 
   const [initialIndex, setInitialIndex] = useState(0);
@@ -69,6 +72,7 @@ export function TestSessionRunner({
     chunkResults?: ChunkResultItem[];
     dailyScore?: any;
     learningPatternBadge?: LearningPatternBadgeResult | null;
+    personalBests?: any;
   } | null>(null);
 
   const [saveStatus, setSaveStatus] = useState<{
@@ -84,6 +88,7 @@ export function TestSessionRunner({
 
   const initSession = (currentCardList: WordCardData[], forceNew = false) => {
     setIsInitializing(true);
+    setInitError(null);
     const cardWordIds = currentCardList.map((c) => c.wordId);
 
     fetch("/api/test-sessions/start", {
@@ -101,6 +106,7 @@ export function TestSessionRunner({
     })
       .then(async (res) => {
         const data = await res.json();
+
         if (res.ok && data.success) {
           const currentId = data.session.id;
           setSessionId(currentId);
@@ -148,7 +154,20 @@ export function TestSessionRunner({
             setInitialAnswers(new Map());
             setInitialIndex(0);
           }
+        } else {
+          console.error("[TestSessionRunner] Failed to start session:", data);
+          setInitError({
+            code: data.code,
+            message: data.detail || data.error || "テストの準備に失敗しました",
+          });
         }
+      })
+      .catch((err) => {
+        console.error("[TestSessionRunner] Start session network error:", err);
+        setInitError({
+          code: "NETWORK_ERROR",
+          message: "サーバーとの通信に失敗しました。接続を確認してください。",
+        });
       })
       .finally(() => {
         setIsInitializing(false);
@@ -231,6 +250,22 @@ export function TestSessionRunner({
     const totalCount = results.length;
     const wrongCards = cards.filter((c) => !(resultsMap.get(c.wordId) ?? false));
 
+    if (!currentId) {
+      console.error("[TestSessionRunner] Cannot complete: sessionId is null");
+      setSaveStatus({
+        isSaving: false,
+        isSuccess: false,
+        errorMessage: "セッションIDが見つかりません",
+        detail: "セッションの開始に失敗していたため、回答は保存されませんでした。",
+      });
+      setResultData({
+        correctCount,
+        totalCount,
+        wrongCards,
+      });
+      return;
+    }
+
     setSaveStatus({ isSaving: true, isSuccess: false });
 
     fetch("/api/test-sessions/complete", {
@@ -291,6 +326,7 @@ export function TestSessionRunner({
               chunkResults,
               dailyScore: data.dailyScore,
               learningPatternBadge: data.learningPatternBadge,
+              personalBests: data.personalBests,
             });
           } else {
             setResultData({
@@ -299,6 +335,7 @@ export function TestSessionRunner({
               wrongCards,
               dailyScore: data.dailyScore,
               learningPatternBadge: data.learningPatternBadge,
+              personalBests: data.personalBests,
             });
           }
         } else {
@@ -337,6 +374,59 @@ export function TestSessionRunner({
         <RefreshCw className="h-6 w-6 animate-spin text-ink/40" />
         <p className="text-xs">テストを準備中...</p>
       </div>
+    );
+  }
+
+  // セッション開始エラー画面 (カード画面へ進ませない)
+  if (initError) {
+    const isAlreadyCompleted = initError.code === "ALREADY_COMPLETED";
+
+    return (
+      <main className="mx-auto flex h-[80vh] max-w-md md:max-w-xl flex-col items-center justify-center gap-4 p-6 text-center animate-in fade-in duration-200">
+        <div className="w-full rounded-3xl border border-line bg-white p-6 shadow-sm space-y-4">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-700 border border-emerald-300">
+            {isAlreadyCompleted ? (
+              <CheckCircle2 className="h-8 w-8" />
+            ) : (
+              <AlertTriangle className="h-8 w-8 text-akashiito" />
+            )}
+          </div>
+
+          <div>
+            <h1 className="font-mincho text-xl font-bold text-ink">
+              {isAlreadyCompleted
+                ? "本日の本番チェックは受験済みです"
+                : "テストの準備に失敗しました"}
+            </h1>
+            <p className="mt-2 font-maru text-xs text-ink/60 leading-relaxed">
+              {isAlreadyCompleted
+                ? "本番デイリーチェックは1日1回限定です。練習テストは何度でも受験できます。"
+                : initError.message}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 pt-2">
+            {!isAlreadyCompleted && (
+              <button
+                type="button"
+                onClick={() => initSession(cards)}
+                className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl bg-ink font-mincho text-sm font-bold text-paper shadow-sm transition active:scale-98 cursor-pointer hover:bg-ink/90"
+              >
+                <RefreshCw className="h-4 w-4" />
+                <span>もう一度試す</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => router.push(backUrl)}
+              className="flex min-h-[44px] w-full items-center justify-center rounded-xl border border-line bg-paper font-maru text-xs font-medium text-ink/70 transition hover:bg-paper-hover active:scale-98 cursor-pointer"
+            >
+              {backLabel}
+            </button>
+          </div>
+        </div>
+      </main>
     );
   }
 
@@ -439,6 +529,7 @@ export function TestSessionRunner({
         dailyScore={resultData.dailyScore}
         learningPatternBadge={resultData.learningPatternBadge}
         completedSessionId={sessionId}
+        personalBests={resultData.personalBests}
       />
     );
   }
